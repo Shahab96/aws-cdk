@@ -1,10 +1,11 @@
-import { IConstruct } from "./construct";
-import { unresolved } from "./private/encoding";
-import { Intrinsic } from "./private/intrinsic";
-import { resolve } from "./private/resolve";
-import { TokenMap } from "./private/token-map";
-import { IResolvable, ITokenResolver } from "./resolvable";
-import { TokenizedStringFragments } from "./string-fragments";
+import { IConstruct } from './construct-compat';
+import { Lazy } from './lazy';
+import { unresolved } from './private/encoding';
+import { Intrinsic } from './private/intrinsic';
+import { resolve } from './private/resolve';
+import { TokenMap } from './private/token-map';
+import { IResolvable, ITokenResolver } from './resolvable';
+import { TokenizedStringFragments } from './string-fragments';
 
 /**
  * Represents a special or lazily-evaluated value.
@@ -114,7 +115,7 @@ export class Tokenization {
     return resolve(obj, {
       scope: options.scope,
       resolver: options.resolver,
-      preparing: (options.preparing !== undefined ? options.preparing : false)
+      preparing: (options.preparing !== undefined ? options.preparing : false),
     });
   }
 
@@ -127,6 +128,22 @@ export class Tokenization {
    */
   public static isResolvable(obj: any): obj is IResolvable {
     return isResolvableObject(obj);
+  }
+
+  /**
+   * Stringify a number directly or lazily if it's a Token. If it is an object (i.e., { Ref: 'SomeLogicalId' }), return it as-is.
+   */
+  public static stringifyNumber(x: number) {
+    // only convert numbers to strings so that Refs, conditions, and other things don't end up synthesizing as [object object]
+
+    if (Token.isUnresolved(x)) {
+      return Lazy.stringValue({ produce: context => {
+        const resolved = context.resolve(x);
+        return typeof resolved !== 'number' ? resolved : `${resolved}`;
+      } });
+    } else {
+      return typeof x !== 'number' ? x : `${x}`;
+    }
   }
 
   private constructor() {

@@ -19,7 +19,9 @@
                 "kms:Delete*",
                 "kms:ScheduleKeyDeletion",
                 "kms:CancelKeyDeletion",
-                "kms:GenerateDataKey"
+                "kms:GenerateDataKey",
+                "kms:TagResource",
+                "kms:UntagResource"
               ],
               "Effect": "Allow",
               "Principal": {
@@ -82,8 +84,8 @@
           "Version": "2012-10-17"
         }
       },
-      "DeletionPolicy": "Retain",
-      "UpdateReplacePolicy": "Retain"
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete"
     },
     "PipelineArtifactsBucket22248F97": {
       "Type": "AWS::S3::Bucket",
@@ -102,10 +104,16 @@
               }
             }
           ]
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
         }
       },
-      "DeletionPolicy": "Retain",
-      "UpdateReplacePolicy": "Retain"
+      "UpdateReplacePolicy": "Retain",
+      "DeletionPolicy": "Retain"
     },
     "PipelineArtifactsBucketEncryptionKeyAlias5C510EEE": {
       "Type": "AWS::KMS::Alias",
@@ -118,8 +126,8 @@
           ]
         }
       },
-      "DeletionPolicy": "Retain",
-      "UpdateReplacePolicy": "Retain"
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete"
     },
     "PipelineRoleD68726F7": {
       "Type": "AWS::IAM::Role",
@@ -296,7 +304,10 @@
         "ArtifactStore": {
           "EncryptionKey": {
             "Id": {
-              "Ref": "PipelineArtifactsBucketEncryptionKey01D58D69"
+              "Fn::GetAtt": [
+                "PipelineArtifactsBucketEncryptionKey01D58D69",
+                "Arn"
+              ]
             },
             "Type": "KMS"
           },
@@ -378,7 +389,6 @@
                 }
               ]
             },
-
             {
               "Action": [
                 "s3:DeleteObject*",
@@ -564,10 +574,10 @@
           "Status": "Enabled"
         }
       },
-      "DeletionPolicy": "Delete",
-      "UpdateReplacePolicy": "Delete"
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete"
     },
-    "PipelineBucketawscdkcodepipelinelambdaPipeline87A4B3D3SourceEventRuleCE4D4505": {
+    "PipelineBucketawscdkcodepipelinelambdaPipeline87A4B3D3SourceEventRulekey23D3C004": {
       "Type": "AWS::Events::Rule",
       "Properties": {
         "EventPattern": {
@@ -597,8 +607,20 @@
               ]
             },
             "eventName": [
+              "CompleteMultipartUpload",
+              "CopyObject",
               "PutObject"
-            ]
+            ],
+            "requestParameters": {
+              "bucketName": [
+                {
+                  "Ref": "PipelineBucketB967BD35"
+                }
+              ],
+              "key": [
+                "key"
+              ]
+            }
           }
         },
         "State": "ENABLED",
@@ -640,8 +662,8 @@
     },
     "CloudTrailS310CD22F2": {
       "Type": "AWS::S3::Bucket",
-      "DeletionPolicy": "Retain",
-      "UpdateReplacePolicy": "Retain"
+      "UpdateReplacePolicy": "Retain",
+      "DeletionPolicy": "Retain"
     },
     "CloudTrailS3PolicyEA49A03E": {
       "Type": "AWS::S3::BucketPolicy",
@@ -809,7 +831,7 @@
             "Arn"
           ]
         },
-        "Runtime": "nodejs8.10"
+        "Runtime": "nodejs10.x"
       },
       "DependsOn": [
         "LambdaFunServiceRoleDefaultPolicy217FED83",

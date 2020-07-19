@@ -1,16 +1,10 @@
 ## Testing utilities and assertions for CDK libraries
 <!--BEGIN STABILITY BANNER-->
-
 ---
 
-![Stability: Experimental](https://img.shields.io/badge/stability-Experimental-important.svg?style=for-the-badge)
+![cdk-constructs: Experimental](https://img.shields.io/badge/cdk--constructs-experimental-important.svg?style=for-the-badge)
 
-> **This is a _developer preview_ (public beta) module. Releases might lack important features and might have
-> future breaking changes.**
->
-> This API is still under active development and subject to non-backward
-> compatible changes or removal in any future version. Use of the API is not recommended in production
-> environments. Experimental APIs are not subject to the Semantic Versioning model.
+> The APIs of higher level constructs in this module are experimental and under active development. They are subject to non-backward compatible changes or removal in any future version. These are not subject to the [Semantic Versioning](https://semver.org/) model and breaking changes will be announced in the release notes. This means that while you may use them, you may need to update your source code when upgrading to a newer version of this package.
 
 ---
 <!--END STABILITY BANNER-->
@@ -69,70 +63,97 @@ If you only care that a resource of a particular type exists (regardless of its 
 
 ```ts
 haveResource(type, subsetOfProperties)
+haveResourceLike(type, subsetOfProperties)
 ```
 
 Example:
 
 ```ts
 expect(stack).to(haveResource('AWS::CertificateManager::Certificate', {
-    DomainName: 'test.example.com'
+    DomainName: 'test.example.com',
     // Note: some properties omitted here
+
+    ShouldNotExist: ABSENT
 }));
 ```
 
+The object you give to `haveResource`/`haveResourceLike` like can contain the
+following values:
 
-## Integration tests
+- **Literal values**: the given property in the resource must match the given value *exactly*.
+- `ABSENT`: a magic value to assert that a particular key in an object is *not* set (or set to `undefined`).
+- special matchers for inexact matching. You can use these to match values based on more lenient conditions
+  than the default (such as an array containing at least one element, ignoring the rest, or an inexact string
+  match).
 
-Integration tests are modeled as CDK apps that are deployed by the developers.
-If deployment succeeds, the synthesized template is saved in a local file and
-"locked". During build, the test app is only synthesized and compared against
-the checked-in file to protect against regressions.
+The following matchers exist:
 
-### Setup
+- `objectLike(O)` - the value has to be an object matching at least the keys in `O` (but may contain
+  more). The nested values must match exactly.
+- `deepObjectLike(O)` - as `objectLike`, but nested objects are also treated as partial specifications.
+- `exactValue(X)` - must match exactly the given value. Use this to escape from `deepObjectLike`'s leniency
+  back to exact value matching.
+- `arrayWith(E, [F, ...])` - value must be an array containing the given elements (or matchers) in any order.
+- `stringLike(S)` - value must be a string matching `S`. `S` may contain `*` as wildcard to match any number
+  of characters.
+- `anything()` - matches any value.
+- `notMatching(M)` - any value that does NOT match the given matcher (or exact value) given.
+- `encodedJson(M)` - value must be a string which, when decoded as JSON, matches the given matcher or
+  exact value.
 
-Create any number of files called `integ.*.ts` in your `test` directory. These
-should be CDK apps containing a single stack.
+Slightly more complex example with array matchers:
 
-Add the following to your `package.json`':
-
-```json
-{
-    scripts: {
-        "test": ".... && cdk-integ-assert",
-        "integ": "cdk-integ"
-    },
-    ...
-    devDependencies: {
-        "@aws-cdk/assert": "*",
-        "aws-cdk": "*"
-    }
-}
+```ts
+expect(stack).to(haveResourceLike('AWS::IAM::Policy', {
+  PolicyDocument: {
+    Statement: arrayWith(objectLike({
+      Action: ['s3:GetObject'],
+      Resource: ['arn:my:arn'],
+    }})
+  }
+}));
 ```
 
-This installs two tools into your scripts:
+### Check number of resources
 
- * When `npm test` is executed (during build), the `cdk-integ-assert` tool is
-   invoked. This tool will only synthesize the integration test stacks and
-   compare them to the .expected files. If the files differ (or do not exist),
-   the test will fail.
- * When `npm run integ` is executed (manually by the developer), the `cdk-integ`
-   tool is invoked. This tool will actually attempt to deploy the integration
-   test stacks into the default environment. If it succeeds, the .expected file
-   will be updated to include the latest synthesized stack.
+If you want to assert that `n` number of resources of a particular type exist, with or without specific properties:
 
-The usage of `cdk-integ` is:
-
-```bash
-cdk-integ [--no-clean] [filters...]
-
-# or
-
-npm run integ -- [--no-clean] [filters...]
+```ts
+countResources(type, count)
+countResourcesLike(type, count, props)
 ```
 
- * If `--no-clean` is specified, the integration test stacks will not be cleaned
-   up. This can be used to perform manual validation on the stacks.
- * If filters are specified, each test name is evaluated against each filter. If
-   the name matches any of the filters, the test is included. Otherwise it is
-   skipped.
+Example:
 
+```ts
+expect(stack).to(countResources('AWS::ApiGateway::Method', 3));
+expect(stack).to(countResourcesLike('AWS::ApiGateway::Method', 1, {
+  HttpMethod: 'GET',
+  ResourceId: {
+    "Ref": "MyResource01234"
+  }
+}));
+```
+
+### Check existence of an output
+`haveOutput` assertion can be used to check that a stack contains specific output.
+Parameters to check against can be:
+- `outputName`
+- `outputValue`
+- `exportName`
+
+If `outputValue` is provided, at least one of `outputName`, `exportName` should be provided as well
+
+Example
+```ts
+expect(synthStack).to(haveOutput({
+  outputName: 'TestOutputName',
+  exportName: 'TestOutputExportName',
+  outputValue: {
+    'Fn::GetAtt': [
+      'TestResource',
+      'Arn'
+    ]
+  }
+}));
+```

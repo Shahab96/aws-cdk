@@ -1,10 +1,10 @@
 ## Amazon ECS Construct Library
 <!--BEGIN STABILITY BANNER-->
-
 ---
 
-![Stability: Stable](https://img.shields.io/badge/stability-Stable-success.svg?style=for-the-badge)
+![cfn-resources: Stable](https://img.shields.io/badge/cfn--resources-stable-success.svg?style=for-the-badge)
 
+![cdk-constructs: Stable](https://img.shields.io/badge/cdk--constructs-stable-success.svg?style=for-the-badge)
 
 ---
 <!--END STABILITY BANNER-->
@@ -24,7 +24,7 @@ adds capacity to it,
 and instantiates the Amazon ECS Service with an automatic load balancer.
 
 ```ts
-import ecs = require('@aws-cdk/aws-ecs');
+import * as ecs from '@aws-cdk/aws-ecs';
 
 // Create an ECS cluster
 const cluster = new ecs.Cluster(this, 'Cluster', {
@@ -37,19 +37,25 @@ cluster.addCapacity('DefaultAutoScalingGroupCapacity', {
   desiredCapacity: 3,
 });
 
+const taskDefinition = new ecs.Ec2TaskDefinition(this, 'TaskDef');
+
+taskDefinition.addContainer('DefaultContainer', {
+  image: ecs.ContainerImage.fromRegistry("amazon/amazon-ecs-sample"),
+  memoryLimitMiB: 512,
+});
+
 // Instantiate an Amazon ECS Service
 const ecsService = new ecs.Ec2Service(this, 'Service', {
   cluster,
-  memoryLimitMiB: 512,
-  image: ecs.ContainerImage.fromRegistry("amazon/amazon-ecs-sample"),
+  taskDefinition,
 });
 ```
 
 For a set of constructs defining common ECS architectural patterns, see the `@aws-cdk/aws-ecs-patterns` package.
 
-## AWS Fargate vs Amazon ECS
+## Launch Types: AWS Fargate vs Amazon EC2
 
-There are two sets of constructs in this library; one to run tasks on Amazon ECS and
+There are two sets of constructs in this library; one to run tasks on Amazon EC2 and
 one to run tasks on AWS Fargate.
 
 - Use the `Ec2TaskDefinition` and `Ec2Service` constructs to run tasks on Amazon EC2 instances running in your account.
@@ -122,6 +128,23 @@ cluster.addAutoScalingGroup(autoScalingGroup);
 ```
 
 If you omit the property `vpc`, the construct will create a new VPC with two AZs.
+
+### Spot Instances
+
+To add spot instances into the cluster, you must specify the `spotPrice` in the `ecs.AddCapacityOptions` and optionally enable the `spotInstanceDraining` property.
+
+```ts
+// Add an AutoScalingGroup with spot instances to the existing cluster
+cluster.addCapacity('AsgSpot', {
+  maxCapacity: 2,
+  minCapacity: 2,
+  desiredCapacity: 2,
+  instanceType: new ec2.InstanceType('c5.xlarge'),
+  spotPrice: '0.0735',
+  // Enable the Automated Spot Draining support for Amazon ECS
+  spotInstanceDraining: true,
+});
+```
 
 ## Task definitions
 
@@ -204,6 +227,8 @@ obtained from either DockerHub or from ECR repositories, or built directly from 
   to start. If no tag is provided, "latest" is assumed.
 * `ecs.ContainerImage.fromAsset('./image')`: build and upload an
   image directly from a `Dockerfile` in your source directory.
+* `ecs.ContainerImage.fromDockerImageAsset(asset)`: uses an existing
+  `@aws-cdk/aws-ecr-assets.DockerImageAsset` as a container image.
 
 ### Environment variables
 
@@ -218,6 +243,7 @@ taskDefinition.addContainer('container', {
   },
   secrets: { // Retrieved from AWS Secrets Manager or AWS Systems Manager Parameter Store at container start-up.
     SECRET: ecs.Secret.fromSecretsManager(secret),
+    DB_PASSWORD: ecs.Secret.fromSecretsManager(dbSecret, 'password'), // Reference a specific JSON field
     PARAMETER: ecs.Secret.fromSsmParameter(parameter),
   }
 });
@@ -241,46 +267,39 @@ const service = new ecs.FargateService(this, 'Service', {
   desiredCount: 5
 });
 ```
+`Services` by default will create a security group if not provided.
+If you'd like to specify which security groups to use you can override the `securityGroups` property.
 
 ### Include an application/network load balancer
 
 `Services` are load balancing targets and can be added to a target group, which will be attached to an application/network load balancers:
 
 ```ts
-import elbv2 = require('@aws-cdk/aws-elasticloadbalancingv2');
+import * as elbv2 from '@aws-cdk/aws-elasticloadbalancingv2';
 
 const service = new ecs.FargateService(this, 'Service', { /* ... */ });
 
 const lb = new elbv2.ApplicationLoadBalancer(this, 'LB', { vpc, internetFacing: true });
 const listener = lb.addListener('Listener', { port: 80 });
-const target = listener.addTargets('ECS', {
+const targetGroup1 = listener.addTargets('ECS1', {
   port: 80,
   targets: [service]
 });
-```
-
-Note that in the example above, if you have multiple containers with multiple ports, then only the first essential container along with its first added container port will be registered as target. To have more control over which container and port to register as targets:
-
-```ts
-import elbv2 = require('@aws-cdk/aws-elasticloadbalancingv2');
-
-const service = new ecs.FargateService(this, 'Service', { /* ... */ });
-
-const lb = new elbv2.ApplicationLoadBalancer(this, 'LB', { vpc, internetFacing: true });
-const listener = lb.addListener('Listener', { port: 80 });
-const target = listener.addTargets('ECS', {
+const targetGroup2 = listener.addTargets('ECS2', {
   port: 80,
   targets: [service.loadBalancerTarget({
     containerName: 'MyContainer',
-    containerPort: 12345
+    containerPort: 8080
   })]
 });
 ```
 
+Note that in the example above, the default `service` only allows you to register the first essential container or the first mapped port on the container as a target and add it to a new target group. To have more control over which container and port to register as targets, you can use `service.loadBalancerTarget()` to return a load balancing target for a specific container and port.
+
 Alternatively, you can also create all load balancer targets to be registered in this service, add them to target groups, and attach target groups to listeners accordingly.
 
 ```ts
-import elbv2 = require('@aws-cdk/aws-elasticloadbalancingv2');
+import * as elbv2 from '@aws-cdk/aws-elasticloadbalancingv2';
 
 const service = new ecs.FargateService(this, 'Service', { /* ... */ });
 
@@ -288,11 +307,9 @@ const lb = new elbv2.ApplicationLoadBalancer(this, 'LB', { vpc, internetFacing: 
 const listener = lb.addListener('Listener', { port: 80 });
 service.registerLoadBalancerTargets(
   {
-    containerTarget: {
-      containerName: 'web',
-      containerPort: 80,
-    },
-    targetGroupId: 'ECS',
+    containerName: 'web',
+    containerPort: 80,
+    newTargetGroupId: 'ECS',
     listener: ecs.ListenerConfig.applicationListener(listener, {
       protocol: elbv2.ApplicationProtocol.HTTPS
     }),
@@ -300,11 +317,26 @@ service.registerLoadBalancerTargets(
 );
 ```
 
+### Using a Load Balancer from a different Stack
+
+If you want to put your Load Balancer and the Service it is load balancing to in
+different stacks, you may not be able to use the convenience methods
+`loadBalancer.addListener()` and `listener.addTargets()`.
+
+The reason is that these methods will create resources in the same Stack as the
+object they're called on, which may lead to cyclic references between stacks.
+Instead, you will have to create an `ApplicationListener` in the service stack,
+or an empty `TargetGroup` in the load balancer stack that you attach your
+service to.
+
+See the [ecs/cross-stack-load-balancer example](https://github.com/aws-samples/aws-cdk-examples/tree/master/typescript/ecs/cross-stack-load-balancer/)
+for the alternatives.
+
 ### Include a classic load balancer
 `Services` can also be directly attached to a classic load balancer as targets:
 
 ```ts
-import elb = require('@aws-cdk/aws-elasticloadbalancing');
+import * as elb from '@aws-cdk/aws-elasticloadbalancing';
 
 const service = new ecs.Ec2Service(this, 'Service', { /* ... */ });
 
@@ -316,7 +348,7 @@ lb.addTarget(service);
 Similarly, if you want to have more control over load balancer targeting:
 
 ```ts
-import elb = require('@aws-cdk/aws-elasticloadbalancing');
+import * as elb from '@aws-cdk/aws-elasticloadbalancing';
 
 const service = new ecs.Ec2Service(this, 'Service', { /* ... */ });
 
@@ -391,7 +423,7 @@ To start an Amazon ECS task on an Amazon EC2-backed Cluster, instantiate an
 `@aws-cdk/aws-events-targets.EcsTask` instead of an `Ec2Service`:
 
 ```ts
-import targets = require('@aws-cdk/aws-events-targets');
+import * as targets from '@aws-cdk/aws-events-targets';
 
 // Create a Task Definition for the container to start
 const taskDefinition = new ecs.Ec2TaskDefinition(this, 'TaskDef');
@@ -431,7 +463,8 @@ Currently Supported Log Drivers:
 - journald
 - json-file
 - splunk
-- syslog  
+- syslog
+- awsfirelens
 
 ### awslogs Log Driver
 
@@ -441,7 +474,7 @@ const taskDefinition = new ecs.Ec2TaskDefinition(this, 'TaskDef');
 taskDefinition.addContainer('TheContainer', {
   image: ecs.ContainerImage.fromRegistry('example-image'),
   memoryLimitMiB: 256,
-  logging: new ecs.LogDrivers.awslogs({ streamPrefix: 'EventDemo' })
+  logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'EventDemo' })
 });
 ```
 
@@ -453,7 +486,7 @@ const taskDefinition = new ecs.Ec2TaskDefinition(this, 'TaskDef');
 taskDefinition.addContainer('TheContainer', {
   image: ecs.ContainerImage.fromRegistry('example-image'),
   memoryLimitMiB: 256,
-  logging: new ecs.LogDrivers.fluentd()
+  logging: ecs.LogDrivers.fluentd()
 });
 ```
 
@@ -465,7 +498,7 @@ const taskDefinition = new ecs.Ec2TaskDefinition(this, 'TaskDef');
 taskDefinition.addContainer('TheContainer', {
   image: ecs.ContainerImage.fromRegistry('example-image'),
   memoryLimitMiB: 256,
-  logging: new ecs.LogDrivers.gelf()
+  logging: ecs.LogDrivers.gelf({ address: 'my-gelf-address' })
 });
 ```
 
@@ -477,7 +510,7 @@ const taskDefinition = new ecs.Ec2TaskDefinition(this, 'TaskDef');
 taskDefinition.addContainer('TheContainer', {
   image: ecs.ContainerImage.fromRegistry('example-image'),
   memoryLimitMiB: 256,
-  logging: new ecs.LogDrivers.journald()
+  logging: ecs.LogDrivers.journald()
 });
 ```
 
@@ -489,7 +522,7 @@ const taskDefinition = new ecs.Ec2TaskDefinition(this, 'TaskDef');
 taskDefinition.addContainer('TheContainer', {
   image: ecs.ContainerImage.fromRegistry('example-image'),
   memoryLimitMiB: 256,
-  logging: new ecs.LogDrivers.jsonFile()
+  logging: ecs.LogDrivers.jsonFile()
 });
 ```
 
@@ -501,7 +534,10 @@ const taskDefinition = new ecs.Ec2TaskDefinition(this, 'TaskDef');
 taskDefinition.addContainer('TheContainer', {
   image: ecs.ContainerImage.fromRegistry('example-image'),
   memoryLimitMiB: 256,
-  logging: new ecs.LogDrivers.splunk()
+  logging: ecs.LogDrivers.splunk({
+    token: cdk.SecretValue.secretsManager('my-splunk-token'),
+    url: 'my-splunk-url'
+  })
 });
 ```
 
@@ -513,7 +549,25 @@ const taskDefinition = new ecs.Ec2TaskDefinition(this, 'TaskDef');
 taskDefinition.addContainer('TheContainer', {
   image: ecs.ContainerImage.fromRegistry('example-image'),
   memoryLimitMiB: 256,
-  logging: new ecs.LogDrivers.syslog()
+  logging: ecs.LogDrivers.syslog()
+});
+```
+
+### firelens Log Driver
+
+```ts
+// Create a Task Definition for the container to start
+const taskDefinition = new ecs.Ec2TaskDefinition(this, 'TaskDef');
+taskDefinition.addContainer('TheContainer', {
+  image: ecs.ContainerImage.fromRegistry('example-image'),
+  memoryLimitMiB: 256,
+  logging: ecs.LogDrivers.firelens({
+    options: {
+        Name: 'firehose',
+        region: 'us-west-2',
+        delivery_stream: 'my-stream',
+    }
+  })
 });
 ```
 

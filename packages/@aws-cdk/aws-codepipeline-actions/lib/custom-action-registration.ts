@@ -1,5 +1,5 @@
-import codepipeline = require('@aws-cdk/aws-codepipeline');
-import cdk = require('@aws-cdk/core');
+import * as codepipeline from '@aws-cdk/aws-codepipeline';
+import * as cdk from '@aws-cdk/core';
 
 /**
  * The creation attributes used for defining a configuration property
@@ -19,9 +19,6 @@ export interface CustomActionProperty {
    */
   description?: string;
 
-  // because of @see URLs
-  // tslint:disable:max-line-length
-
   /**
    * Whether this property is a key.
    *
@@ -38,8 +35,6 @@ export interface CustomActionProperty {
    * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-codepipeline-customactiontype-configurationproperties.html#cfn-codepipeline-customactiontype-configurationproperties-queryable
    */
   queryable?: boolean;
-
-  // tslint:enable:max-line-length
 
   /**
    * Whether this property is required.

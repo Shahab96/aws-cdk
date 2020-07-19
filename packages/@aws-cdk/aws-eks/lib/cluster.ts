@@ -1,18 +1,22 @@
-import autoscaling = require('@aws-cdk/aws-autoscaling');
-import ec2 = require('@aws-cdk/aws-ec2');
-import { Subnet } from '@aws-cdk/aws-ec2';
-import iam = require('@aws-cdk/aws-iam');
-import lambda = require('@aws-cdk/aws-lambda');
-import ssm = require('@aws-cdk/aws-ssm');
-import { CfnOutput, Construct, Duration, IResource, Resource, Stack, Tag } from '@aws-cdk/core';
-import path = require('path');
+import * as fs from 'fs';
+import * as path from 'path';
+import * as autoscaling from '@aws-cdk/aws-autoscaling';
+import * as ec2 from '@aws-cdk/aws-ec2';
+import * as iam from '@aws-cdk/aws-iam';
+import * as ssm from '@aws-cdk/aws-ssm';
+import { CfnOutput, CfnResource, Construct, IResource, Resource, Stack, Tag, Token } from '@aws-cdk/core';
+import * as YAML from 'yaml';
 import { AwsAuth } from './aws-auth';
-import { ClusterResource } from './cluster-resource';
+import { clusterArnComponents, ClusterResource } from './cluster-resource';
 import { CfnCluster, CfnClusterProps } from './eks.generated';
+import { FargateProfile, FargateProfileOptions } from './fargate-profile';
+import { HelmChart, HelmChartOptions } from './helm-chart';
+import { KubernetesPatch } from './k8s-patch';
 import { KubernetesResource } from './k8s-resource';
-import { KubectlLayer } from './kubectl-layer';
-import { spotInterruptHandler } from './spot-interrupt-handler';
-import { renderUserData } from './user-data';
+import { KubectlProvider } from './kubectl-provider';
+import { Nodegroup, NodegroupOptions  } from './managed-nodegroup';
+import { ServiceAccount, ServiceAccountOptions } from './service-account';
+import { LifecycleLabel, renderAmazonLinuxUserData, renderBottlerocketUserData } from './user-data';
 
 // defaults are based on https://eksctl.io
 const DEFAULT_CAPACITY_COUNT = 2;
@@ -51,8 +55,23 @@ export interface ICluster extends IResource, ec2.IConnectable {
    * @attribute
    */
   readonly clusterCertificateAuthorityData: string;
+
+  /**
+   * The cluster security group that was created by Amazon EKS for the cluster.
+   * @attribute
+   */
+  readonly clusterSecurityGroupId: string;
+
+  /**
+   * Amazon Resource Name (ARN) or alias of the customer master key (CMK).
+   * @attribute
+   */
+  readonly clusterEncryptionConfigKeyArn: string;
 }
 
+/**
+ * Attributes for EKS clusters.
+ */
 export interface ClusterAttributes {
   /**
    * The VPC in which this Cluster was created
@@ -81,15 +100,25 @@ export interface ClusterAttributes {
   readonly clusterCertificateAuthorityData: string;
 
   /**
+   * The cluster security group that was created by Amazon EKS for the cluster.
+   */
+  readonly clusterSecurityGroupId: string;
+
+  /**
+   * Amazon Resource Name (ARN) or alias of the customer master key (CMK).
+   */
+  readonly clusterEncryptionConfigKeyArn: string;
+
+  /**
    * The security groups associated with this cluster.
    */
   readonly securityGroups: ec2.ISecurityGroup[];
 }
 
 /**
- * Properties to instantiate the Cluster
+ * Options for configuring an EKS cluster.
  */
-export interface ClusterProps {
+export interface ClusterOptions {
   /**
    * The VPC in which to create the Cluster
    *
@@ -137,10 +166,8 @@ export interface ClusterProps {
 
   /**
    * The Kubernetes version to run in the cluster
-   *
-   * @default - If not supplied, will use Amazon default version
    */
-  readonly version?: string;
+  readonly version: KubernetesVersion;
 
   /**
    * An IAM role that will be added to the `system:masters` Kubernetes RBAC
@@ -155,6 +182,46 @@ export interface ClusterProps {
    *            to another role.
    */
   readonly mastersRole?: iam.IRole;
+
+  /**
+   * Controls the "eks.amazonaws.com/compute-type" annotation in the CoreDNS
+   * configuration on your cluster to determine which compute type to use
+   * for CoreDNS.
+   *
+   * @default CoreDnsComputeType.EC2 (for `FargateCluster` the default is FARGATE)
+   */
+  readonly coreDnsComputeType?: CoreDnsComputeType;
+
+  /**
+   * Determines whether a CloudFormation output with the name of the cluster
+   * will be synthesized.
+   *
+   * @default false
+   */
+  readonly outputClusterName?: boolean;
+
+  /**
+   * Determines whether a CloudFormation output with the ARN of the "masters"
+   * IAM role will be synthesized (if `mastersRole` is specified).
+   *
+   * @default false
+   */
+  readonly outputMastersRoleArn?: boolean;
+
+  /**
+   * Determines whether a CloudFormation output with the `aws eks
+   * update-kubeconfig` command will be synthesized. This command will include
+   * the cluster name and, if applicable, the ARN of the masters IAM role.
+   *
+   * @default true
+   */
+  readonly outputConfigCommand?: boolean;
+}
+
+/**
+ * Configuration props for EKS clusters.
+ */
+export interface ClusterProps extends ClusterOptions {
 
   /**
    * Allows defining `kubectrl`-related resources on this cluster.
@@ -199,29 +266,47 @@ export interface ClusterProps {
   readonly defaultCapacityInstance?: ec2.InstanceType;
 
   /**
-   * Determines whether a CloudFormation output with the name of the cluster
-   * will be synthesized.
+   * The default capacity type for the cluster.
    *
-   * @default false
+   * @default NODEGROUP
    */
-  readonly outputClusterName?: boolean;
+  readonly defaultCapacityType?: DefaultCapacityType;
+}
+
+/**
+ * Kubernetes cluster version
+ */
+export class KubernetesVersion {
+  /**
+   * Kubernetes version 1.14
+   */
+  public static readonly V1_14 = KubernetesVersion.of('1.14');
 
   /**
-   * Determines whether a CloudFormation output with the ARN of the "masters"
-   * IAM role will be synthesized (if `mastersRole` is specified).
-   *
-   * @default false
+   * Kubernetes version 1.15
    */
-  readonly outputMastersRoleArn?: boolean;
+  public static readonly V1_15 = KubernetesVersion.of('1.15');
 
   /**
-   * Determines whether a CloudFormation output with the `aws eks
-   * update-kubeconfig` command will be synthesized. This command will include
-   * the cluster name and, if applicable, the ARN of the masters IAM role.
-   *
-   * @default true
+   * Kubernetes version 1.16
    */
-  readonly outputConfigCommand?: boolean;
+  public static readonly V1_16 = KubernetesVersion.of('1.16');
+
+  /**
+   * Kubernetes version 1.17
+   */
+  public static readonly V1_17 = KubernetesVersion.of('1.17');
+
+  /**
+   * Custom cluster version
+   * @param version custom version number
+   */
+  public static of(version: string) { return new KubernetesVersion(version); }
+  /**
+   *
+   * @param version cluster version number
+   */
+  private constructor(public readonly version: string) { }
 }
 
 /**
@@ -274,6 +359,16 @@ export class Cluster extends Resource implements ICluster {
   public readonly clusterCertificateAuthorityData: string;
 
   /**
+   * The cluster security group that was created by Amazon EKS for the cluster.
+   */
+  public readonly clusterSecurityGroupId: string;
+
+  /**
+   * Amazon Resource Name (ARN) or alias of the customer master key (CMK).
+   */
+  public readonly clusterEncryptionConfigKeyArn: string;
+
+  /**
    * Manages connection rules (Security Group Rules) for the cluster
    *
    * @type {ec2.Connections}
@@ -292,33 +387,58 @@ export class Cluster extends Resource implements ICluster {
   public readonly kubectlEnabled: boolean;
 
   /**
-   * The CloudFormation custom resource handler that can apply Kubernetes
-   * manifests to this cluster.
-   *
-   * @internal
-   */
-  public readonly _k8sResourceHandler?: lambda.Function;
-
-  /**
    * The auto scaling group that hosts the default capacity for this cluster.
-   * This will be `undefined` if the default capacity is set to 0.
+   * This will be `undefined` if the `defaultCapacityType` is not `EC2` or
+   * `defaultCapacityType` is `EC2` but default capacity is set to 0.
    */
   public readonly defaultCapacity?: autoscaling.AutoScalingGroup;
 
   /**
-   * The IAM role that was used to create this cluster. This role is
-   * automatically added by Amazon EKS to the `system:masters` RBAC group of the
-   * cluster. Use `addMastersRole` or `props.mastersRole` to define additional
-   * IAM roles as administrators.
+   * The node group that hosts the default capacity for this cluster.
+   * This will be `undefined` if the `defaultCapacityType` is `EC2` or
+   * `defaultCapacityType` is `NODEGROUP` but default capacity is set to 0.
    */
-  private readonly _defaultMastersRole?: iam.IRole;
+  public readonly defaultNodegroup?: Nodegroup;
+
+  /**
+   * If the cluster has one (or more) FargateProfiles associated, this array
+   * will hold a reference to each.
+   */
+  private readonly _fargateProfiles: FargateProfile[] = [];
+
+  /**
+   * If this cluster is kubectl-enabled, returns the `ClusterResource` object
+   * that manages it. If this cluster is not kubectl-enabled (i.e. uses the
+   * stock `CfnCluster`), this is `undefined`.
+   */
+  private readonly _clusterResource?: ClusterResource;
 
   /**
    * Manages the aws-auth config map.
    */
   private _awsAuth?: AwsAuth;
 
-  private readonly version: string | undefined;
+  private _openIdConnectProvider?: iam.OpenIdConnectProvider;
+
+  private _spotInterruptHandler?: HelmChart;
+
+  private _neuronDevicePlugin?: KubernetesResource;
+
+  private readonly version: KubernetesVersion;
+
+  /**
+   * A dummy CloudFormation resource that is used as a wait barrier which
+   * represents that the cluster is ready to receive "kubectl" commands.
+   *
+   * Specifically, all fargate profiles are automatically added as a dependency
+   * of this barrier, which means that it will only be "signaled" when all
+   * fargate profiles have been successfully created.
+   *
+   * When kubectl resources call `_attachKubectlResourceScope()`, this resource
+   * is added as their dependency which implies that they can only be deployed
+   * after the cluster is ready.
+   */
+  private readonly _kubectlReadyBarrier?: CfnResource;
 
   /**
    * Initiates an EKS Cluster with the supplied arguments
@@ -327,7 +447,7 @@ export class Cluster extends Resource implements ICluster {
    * @param name the name of the Construct to create
    * @param props properties in the IClusterProps interface
    */
-  constructor(scope: Construct, id: string, props: ClusterProps = { }) {
+  constructor(scope: Construct, id: string, props: ClusterProps) {
     super(scope, id, {
       physicalName: props.clusterName,
     });
@@ -339,11 +459,11 @@ export class Cluster extends Resource implements ICluster {
 
     this.tagSubnets();
 
-    this.role = props.role || new iam.Role(this, 'ClusterRole', {
+    // this is the role used by EKS when interacting with AWS resources
+    this.role = props.role || new iam.Role(this, 'Role', {
       assumedBy: new iam.ServicePrincipal('eks.amazonaws.com'),
       managedPolicies: [
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEKSClusterPolicy'),
-        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEKSServicePolicy'),
       ],
     });
 
@@ -364,31 +484,51 @@ export class Cluster extends Resource implements ICluster {
     const clusterProps: CfnClusterProps = {
       name: this.physicalName,
       roleArn: this.role.roleArn,
-      version: props.version,
+      version: props.version.version,
       resourcesVpcConfig: {
         securityGroupIds: [securityGroup.securityGroupId],
-        subnetIds
-      }
+        subnetIds,
+      },
     };
 
     let resource;
     this.kubectlEnabled = props.kubectlEnabled === undefined ? true : props.kubectlEnabled;
     if (this.kubectlEnabled) {
       resource = new ClusterResource(this, 'Resource', clusterProps);
-      this._defaultMastersRole = resource.creationRole;
+      this._clusterResource = resource;
+
+      // see https://github.com/aws/aws-cdk/issues/9027
+      this._clusterResource.creationRole.addToPolicy(new iam.PolicyStatement({
+        actions: ['ec2:DescribeVpcs'],
+        resources: [ stack.formatArn({
+          service: 'ec2',
+          resource: 'vpc',
+          resourceName: this.vpc.vpcId,
+        })],
+      }));
+
+      // we use an SSM parameter as a barrier because it's free and fast.
+      this._kubectlReadyBarrier = new CfnResource(this, 'KubectlReadyBarrier', {
+        type: 'AWS::SSM::Parameter',
+        properties: {
+          Type: 'String',
+          Value: 'aws:cdk:eks:kubectl-ready',
+        },
+      });
+
+      // add the cluster resource itself as a dependency of the barrier
+      this._kubectlReadyBarrier.node.addDependency(this._clusterResource);
     } else {
       resource = new CfnCluster(this, 'Resource', clusterProps);
     }
 
     this.clusterName = this.getResourceNameAttribute(resource.ref);
-    this.clusterArn = this.getResourceArnAttribute(resource.attrArn, {
-      service: 'eks',
-      resource: 'cluster',
-      resourceName: this.physicalName,
-    });
+    this.clusterArn = this.getResourceArnAttribute(resource.attrArn, clusterArnComponents(this.physicalName));
 
     this.clusterEndpoint = resource.attrEndpoint;
     this.clusterCertificateAuthorityData = resource.attrCertificateAuthorityData;
+    this.clusterSecurityGroupId = resource.attrClusterSecurityGroupId;
+    this.clusterEncryptionConfigKeyArn = resource.attrEncryptionConfigKeyArn;
 
     const updateConfigCommandPrefix = `aws eks update-kubeconfig --name ${this.clusterName}`;
     const getTokenCommandPrefix = `aws eks get-token --cluster-name ${this.clusterName}`;
@@ -398,15 +538,10 @@ export class Cluster extends Resource implements ICluster {
       new CfnOutput(this, 'ClusterName', { value: this.clusterName });
     }
 
-    // we maintain a single manifest custom resource handler per cluster since
-    // permissions and role are scoped. This will return `undefined` if kubectl
-    // is not enabled for this cluster.
-    this._k8sResourceHandler = this.createKubernetesResourceHandler();
-
     // map the IAM role to the `system:masters` group.
     if (props.mastersRole) {
       if (!this.kubectlEnabled) {
-        throw new Error(`Cannot specify a "masters" role if kubectl is disabled`);
+        throw new Error('Cannot specify a "masters" role if kubectl is disabled');
       }
 
       this.awsAuth.addMastersRole(props.mastersRole);
@@ -419,10 +554,14 @@ export class Cluster extends Resource implements ICluster {
     }
 
     // allocate default capacity if non-zero (or default).
-    const desiredCapacity = props.defaultCapacity === undefined ? DEFAULT_CAPACITY_COUNT : props.defaultCapacity;
-    if (desiredCapacity > 0) {
+    const minCapacity = props.defaultCapacity === undefined ? DEFAULT_CAPACITY_COUNT : props.defaultCapacity;
+    if (minCapacity > 0) {
       const instanceType = props.defaultCapacityInstance || DEFAULT_CAPACITY_TYPE;
-      this.defaultCapacity = this.addCapacity('DefaultCapacity', { instanceType, desiredCapacity });
+      this.defaultCapacity = props.defaultCapacityType === DefaultCapacityType.EC2 ?
+        this.addCapacity('DefaultCapacity', { instanceType, minCapacity }) : undefined;
+
+      this.defaultNodegroup = props.defaultCapacityType !== DefaultCapacityType.EC2 ?
+        this.addNodegroup('DefaultCapacity', { instanceType, minSize: minCapacity }) : undefined;
     }
 
     const outputConfigCommand = props.outputConfigCommand === undefined ? true : props.outputConfigCommand;
@@ -430,6 +569,10 @@ export class Cluster extends Resource implements ICluster {
       const postfix = commonCommandOptions.join(' ');
       new CfnOutput(this, 'ConfigCommand', { value: `${updateConfigCommandPrefix} ${postfix}` });
       new CfnOutput(this, 'GetTokenCommand', { value: `${getTokenCommandPrefix} ${postfix}` });
+    }
+
+    if (this.kubectlEnabled) {
+      this.defineCoreDnsComputeType(props.coreDnsComputeType ?? CoreDnsComputeType.EC2);
     }
   }
 
@@ -446,13 +589,18 @@ export class Cluster extends Resource implements ICluster {
    * [EC2 Spot Instance Termination Notices](https://aws.amazon.com/blogs/aws/new-ec2-spot-instance-termination-notices/).
    */
   public addCapacity(id: string, options: CapacityOptions): autoscaling.AutoScalingGroup {
+    if (options.machineImageType === MachineImageType.BOTTLEROCKET && options.bootstrapOptions !== undefined ) {
+      throw new Error('bootstrapOptions is not supported for Bottlerocket');
+    }
     const asg = new autoscaling.AutoScalingGroup(this, id, {
       ...options,
       vpc: this.vpc,
-      machineImage: new EksOptimizedImage({
-        nodeType: nodeTypeForInstanceType(options.instanceType),
-        kubernetesVersion: this.version,
-      }),
+      machineImage: options.machineImageType === MachineImageType.BOTTLEROCKET ?
+        new BottleRocketImage() :
+        new EksOptimizedImage({
+          nodeType: nodeTypeForInstanceType(options.instanceType),
+          kubernetesVersion: this.version.version,
+        }),
       updateType: options.updateType || autoscaling.UpdateType.ROLLING_UPDATE,
       instanceType: options.instanceType,
     });
@@ -460,10 +608,31 @@ export class Cluster extends Resource implements ICluster {
     this.addAutoScalingGroup(asg, {
       mapRole: options.mapRole,
       bootstrapOptions: options.bootstrapOptions,
-      bootstrapEnabled: options.bootstrapEnabled
+      bootstrapEnabled: options.bootstrapEnabled,
+      machineImageType: options.machineImageType,
     });
 
+    if (nodeTypeForInstanceType(options.instanceType) === NodeType.INFERENTIA) {
+      this.addNeuronDevicePlugin();
+    }
+
     return asg;
+  }
+
+  /**
+   * Add managed nodegroup to this Amazon EKS cluster
+   *
+   * This method will create a new managed nodegroup and add into the capacity.
+   *
+   * @see https://docs.aws.amazon.com/eks/latest/userguide/managed-node-groups.html
+   * @param id The ID of the nodegroup
+   * @param options options for creating a new nodegroup
+   */
+  public addNodegroup(id: string, options?: NodegroupOptions): Nodegroup {
+    return new Nodegroup(this, `Nodegroup${id}`, {
+      cluster: this,
+      ...options,
+    });
   }
 
   /**
@@ -504,11 +673,13 @@ export class Cluster extends Resource implements ICluster {
 
     const bootstrapEnabled = options.bootstrapEnabled !== undefined ? options.bootstrapEnabled : true;
     if (options.bootstrapOptions && !bootstrapEnabled) {
-      throw new Error(`Cannot specify "bootstrapOptions" if "bootstrapEnabled" is false`);
+      throw new Error('Cannot specify "bootstrapOptions" if "bootstrapEnabled" is false');
     }
 
     if (bootstrapEnabled) {
-      const userData = renderUserData(this.clusterName, autoScalingGroup, options.bootstrapOptions);
+      const userData = options.machineImageType === MachineImageType.BOTTLEROCKET ?
+        renderBottlerocketUserData(this) :
+        renderAmazonLinuxUserData(this.clusterName, autoScalingGroup, options.bootstrapOptions);
       autoScalingGroup.addUserData(...userData);
     }
 
@@ -518,11 +689,11 @@ export class Cluster extends Resource implements ICluster {
 
     // EKS Required Tags
     Tag.add(autoScalingGroup, `kubernetes.io/cluster/${this.clusterName}`, 'owned', {
-      applyToLaunchedInstances: true
+      applyToLaunchedInstances: true,
     });
 
     if (options.mapRole === true && !this.kubectlEnabled) {
-      throw new Error(`Cannot map instance IAM role to RBAC if kubectl is disabled for the cluster`);
+      throw new Error('Cannot map instance IAM role to RBAC if kubectl is disabled for the cluster');
     }
 
     // do not attempt to map the role if `kubectl` is not enabled for this
@@ -534,20 +705,20 @@ export class Cluster extends Resource implements ICluster {
         username: 'system:node:{{EC2PrivateDNSName}}',
         groups: [
           'system:bootstrappers',
-          'system:nodes'
-        ]
+          'system:nodes',
+        ],
       });
     } else {
       // since we are not mapping the instance role to RBAC, synthesize an
       // output so it can be pasted into `aws-auth-cm.yaml`
       new CfnOutput(autoScalingGroup, 'InstanceRoleARN', {
-        value: autoScalingGroup.role.roleArn
+        value: autoScalingGroup.role.roleArn,
       });
     }
 
     // if this is an ASG with spot instances, install the spot interrupt handler (only if kubectl is enabled).
     if (autoScalingGroup.spotPrice && this.kubectlEnabled) {
-      this.addResource('spot-interrupt-handler', ...spotInterruptHandler());
+      this.addSpotInterruptHandler();
     }
   }
 
@@ -556,7 +727,7 @@ export class Cluster extends Resource implements ICluster {
    */
   public get awsAuth() {
     if (!this.kubectlEnabled) {
-      throw new Error(`Cannot define aws-auth mappings if kubectl is disabled`);
+      throw new Error('Cannot define aws-auth mappings if kubectl is disabled');
     }
 
     if (!this._awsAuth) {
@@ -564,6 +735,63 @@ export class Cluster extends Resource implements ICluster {
     }
 
     return this._awsAuth;
+  }
+
+  /**
+   * If this cluster is kubectl-enabled, returns the OpenID Connect issuer url.
+   * This is because the values is only be retrieved by the API and not exposed
+   * by CloudFormation. If this cluster is not kubectl-enabled (i.e. uses the
+   * stock `CfnCluster`), this is `undefined`.
+   * @attribute
+   */
+  public get clusterOpenIdConnectIssuerUrl(): string {
+    if (!this._clusterResource) {
+      throw new Error('unable to obtain OpenID Connect issuer URL. Cluster must be kubectl-enabled');
+    }
+
+    return this._clusterResource.attrOpenIdConnectIssuerUrl;
+  }
+
+  /**
+   * If this cluster is kubectl-enabled, returns the OpenID Connect issuer.
+   * This is because the values is only be retrieved by the API and not exposed
+   * by CloudFormation. If this cluster is not kubectl-enabled (i.e. uses the
+   * stock `CfnCluster`), this is `undefined`.
+   * @attribute
+   */
+  public get clusterOpenIdConnectIssuer(): string {
+    if (!this._clusterResource) {
+      throw new Error('unable to obtain OpenID Connect issuer. Cluster must be kubectl-enabled');
+    }
+
+    return this._clusterResource.attrOpenIdConnectIssuer;
+  }
+
+  /**
+   * An `OpenIdConnectProvider` resource associated with this cluster, and which can be used
+   * to link this cluster to AWS IAM.
+   *
+   * A provider will only be defined if this property is accessed (lazy initialization).
+   */
+  public get openIdConnectProvider() {
+    if (!this.kubectlEnabled) {
+      throw new Error('Cannot specify a OpenID Connect Provider if kubectl is disabled');
+    }
+
+    if (!this._openIdConnectProvider) {
+      this._openIdConnectProvider = new iam.OpenIdConnectProvider(this, 'OpenIdConnectProvider', {
+        url: this.clusterOpenIdConnectIssuerUrl,
+        clientIds: [ 'sts.amazonaws.com' ],
+        /**
+         * For some reason EKS isn't validating the root certificate but a intermediat certificate
+         * which is one level up in the tree. Because of the a constant thumbprint value has to be
+         * stated with this OpenID Connect provider. The certificate thumbprint is the same for all the regions.
+         */
+        thumbprints: [ '9e99a48a9960b14926bb7f3b02e22da2b0ab7280' ],
+      });
+    }
+
+    return this._openIdConnectProvider;
   }
 
   /**
@@ -580,27 +808,149 @@ export class Cluster extends Resource implements ICluster {
     return new KubernetesResource(this, `manifest-${id}`, { cluster: this, manifest });
   }
 
-  private createKubernetesResourceHandler() {
-    if (!this.kubectlEnabled) {
-      return undefined;
+  /**
+   * Defines a Helm chart in this cluster.
+   *
+   * @param id logical id of this chart.
+   * @param options options of this chart.
+   * @returns a `HelmChart` object
+   * @throws If `kubectlEnabled` is `false`
+   */
+  public addChart(id: string, options: HelmChartOptions) {
+    return new HelmChart(this, `chart-${id}`, { cluster: this, ...options });
+  }
+
+  /**
+   * Adds a Fargate profile to this cluster.
+   * @see https://docs.aws.amazon.com/eks/latest/userguide/fargate-profile.html
+   *
+   * @param id the id of this profile
+   * @param options profile options
+   */
+  public addFargateProfile(id: string, options: FargateProfileOptions) {
+    return new FargateProfile(this, `fargate-profile-${id}`, {
+      ...options,
+      cluster: this,
+    });
+  }
+
+  /**
+   * Adds a service account to this cluster.
+   *
+   * @param id the id of this service account
+   * @param options service account options
+   */
+  public addServiceAccount(id: string, options: ServiceAccountOptions = { }) {
+    return new ServiceAccount(this, id, {
+      ...options,
+      cluster: this,
+    });
+  }
+
+  /**
+   * Returns the role ARN for the cluster creation role for kubectl-enabled
+   * clusters.
+   * @param assumedBy The IAM that will assume this role. If omitted, the
+   * creation role will be returned witout modification of its trust policy.
+   *
+   * @internal
+   */
+  public get _kubectlCreationRole() {
+    if (!this._clusterResource) {
+      throw new Error('Unable to perform this operation since kubectl is not enabled for this cluster');
     }
 
-    return new lambda.Function(this, 'KubernetesResourceHandler', {
-      code: lambda.Code.fromAsset(path.join(__dirname, 'k8s-resource')),
-      runtime: lambda.Runtime.PYTHON_3_7,
-      handler: 'index.handler',
-      timeout: Duration.minutes(15),
-      layers: [ KubectlLayer.getOrCreate(this) ],
-      memorySize: 256,
-      environment: {
-        CLUSTER_NAME: this.clusterName,
-      },
+    return this._clusterResource.creationRole;
+  }
 
-      // NOTE: we must use the default IAM role that's mapped to "system:masters"
-      // as the execution role of this custom resource handler. This is the only
-      // way to be able to interact with the cluster after it's been created.
-      role: this._defaultMastersRole,
-    });
+  /**
+   * Internal API used by `FargateProfile` to keep inventory of Fargate profiles associated with
+   * this cluster, for the sake of ensuring the profiles are created sequentially.
+   *
+   * @returns the list of FargateProfiles attached to this cluster, including the one just attached.
+   * @internal
+   */
+  public _attachFargateProfile(fargateProfile: FargateProfile): FargateProfile[] {
+    this._fargateProfiles.push(fargateProfile);
+
+    // add all profiles as a dependency of the "kubectl-ready" barrier because all kubectl-
+    // resources can only be deployed after all fargate profiles are created.
+    if (this._kubectlReadyBarrier) {
+      this._kubectlReadyBarrier.node.addDependency(fargateProfile);
+    }
+
+    return this._fargateProfiles;
+  }
+
+  /**
+   * Adds a resource scope that requires `kubectl` to this cluster and returns
+   * the `KubectlProvider` which is the custom resource provider that should be
+   * used as the resource provider.
+   *
+   * Called from `HelmResource` and `KubernetesResource`
+   *
+   * @property resourceScope the construct scope in which kubectl resources are defined.
+   *
+   * @internal
+   */
+  public _attachKubectlResourceScope(resourceScope: Construct): KubectlProvider {
+    const uid = '@aws-cdk/aws-eks.KubectlProvider';
+
+    if (!this._clusterResource) {
+      throw new Error('Unable to perform this operation since kubectl is not enabled for this cluster');
+    }
+
+    // singleton
+    let provider = this.stack.node.tryFindChild(uid) as KubectlProvider;
+    if (!provider) {
+      // create the provider.
+      provider = new KubectlProvider(this.stack, uid);
+    }
+
+    // allow the kubectl provider to assume the cluster creation role.
+    this._clusterResource.addTrustedRole(provider.role);
+
+    if (!this._kubectlReadyBarrier) {
+      throw new Error('unexpected: kubectl enabled clusters should have a kubectl-ready barrier resource');
+    }
+
+    resourceScope.node.addDependency(this._kubectlReadyBarrier);
+
+    return provider;
+  }
+
+  /**
+   * Installs the AWS spot instance interrupt handler on the cluster if it's not
+   * already added.
+   */
+  private addSpotInterruptHandler() {
+    if (!this._spotInterruptHandler) {
+      this._spotInterruptHandler = this.addChart('spot-interrupt-handler', {
+        chart: 'aws-node-termination-handler',
+        version: '0.7.3',
+        repository: 'https://aws.github.io/eks-charts',
+        namespace: 'kube-system',
+        values: {
+          'nodeSelector.lifecycle': LifecycleLabel.SPOT,
+        },
+      });
+    }
+
+    return this._spotInterruptHandler;
+  }
+
+  /**
+   * Installs the Neuron device plugin on the cluster if it's not
+   * already added.
+   */
+  private addNeuronDevicePlugin() {
+    if (!this._neuronDevicePlugin) {
+      const fileContents = fs.readFileSync(path.join(__dirname, 'addons/neuron-device-plugin.yaml'), 'utf8');
+      const sanitized = YAML.parse(fileContents);
+      this._neuronDevicePlugin = this.addResource('NeuronDevicePlugin', sanitized);
+    }
+
+    return this._neuronDevicePlugin;
   }
 
   /**
@@ -611,15 +961,65 @@ export class Cluster extends Resource implements ICluster {
    * @see https://docs.aws.amazon.com/eks/latest/userguide/network_reqs.html
    */
   private tagSubnets() {
-    for (const subnet of this.vpc.privateSubnets) {
-      if (!Subnet.isVpcSubnet(subnet)) {
-        // Just give up, all of them will be the same.
-        this.node.addWarning('Could not auto-tag private subnets with "kubernetes.io/role/internal-elb=1", please remember to do this manually');
-        return;
-      }
+    const tagAllSubnets = (type: string, subnets: ec2.ISubnet[], tag: string) => {
+      for (const subnet of subnets) {
+        // if this is not a concrete subnet, attach a construct warning
+        if (!ec2.Subnet.isVpcSubnet(subnet)) {
+          // message (if token): "could not auto-tag public/private subnet with tag..."
+          // message (if not token): "count not auto-tag public/private subnet xxxxx with tag..."
+          const subnetID = Token.isUnresolved(subnet.subnetId) ? '' : ` ${subnet.subnetId}`;
+          this.node.addWarning(`Could not auto-tag ${type} subnet${subnetID} with "${tag}=1", please remember to do this manually`);
+          continue;
+        }
 
-      subnet.node.applyAspect(new Tag("kubernetes.io/role/internal-elb", "1"));
+        subnet.node.applyAspect(new Tag(tag, '1'));
+      }
+    };
+
+    // https://docs.aws.amazon.com/eks/latest/userguide/network_reqs.html
+    tagAllSubnets('private', this.vpc.privateSubnets, 'kubernetes.io/role/internal-elb');
+    tagAllSubnets('public', this.vpc.publicSubnets, 'kubernetes.io/role/elb');
+  }
+
+  /**
+   * Patches the CoreDNS deployment configuration and sets the "eks.amazonaws.com/compute-type"
+   * annotation to either "ec2" or "fargate". Note that if "ec2" is selected, the resource is
+   * omitted/removed, since the cluster is created with the "ec2" compute type by default.
+   */
+  private defineCoreDnsComputeType(type: CoreDnsComputeType) {
+    if (!this.kubectlEnabled) {
+      throw new Error('kubectl must be enabled in order to define the compute type for CoreDNS');
     }
+
+    // ec2 is the "built in" compute type of the cluster so if this is the
+    // requested type we can simply omit the resource. since the resource's
+    // `restorePatch` is configured to restore the value to "ec2" this means
+    // that deletion of the resource will change to "ec2" as well.
+    if (type === CoreDnsComputeType.EC2) {
+      return;
+    }
+
+    // this is the json patch we merge into the resource based off of:
+    // https://docs.aws.amazon.com/eks/latest/userguide/fargate-getting-started.html#fargate-gs-coredns
+    const renderPatch = (computeType: CoreDnsComputeType) => ({
+      spec: {
+        template: {
+          metadata: {
+            annotations: {
+              'eks.amazonaws.com/compute-type': computeType,
+            },
+          },
+        },
+      },
+    });
+
+    new KubernetesPatch(this, 'CoreDnsComputeTypePatch', {
+      cluster: this,
+      resourceName: 'deployment/coredns',
+      resourceNamespace: 'kube-system',
+      applyPatch: renderPatch(CoreDnsComputeType.FARGATE),
+      restorePatch: renderPatch(CoreDnsComputeType.EC2),
+    });
   }
 }
 
@@ -660,8 +1060,18 @@ export interface CapacityOptions extends autoscaling.CommonAutoScalingGroupProps
    * @default - none
    */
   readonly bootstrapOptions?: BootstrapOptions;
+
+  /**
+   * Machine image type
+   *
+   * @default MachineImageType.AMAZON_LINUX_2
+   */
+  readonly machineImageType?: MachineImageType;
 }
 
+/**
+ * EKS node bootstrapping options.
+ */
 export interface BootstrapOptions {
   /**
    * Sets `--max-pods` for the kubelet based on the capacity of the EC2 instance.
@@ -738,8 +1148,16 @@ export interface AutoScalingGroupOptions {
 
   /**
    * Allows options for node bootstrapping through EC2 user data.
+   * @default - default options
    */
   readonly bootstrapOptions?: BootstrapOptions;
+
+  /**
+   * Allow options to specify different machine image type
+   *
+   * @default MachineImageType.AMAZON_LINUX_2
+   */
+  readonly machineImageType?: MachineImageType;
 }
 
 /**
@@ -748,6 +1166,8 @@ export interface AutoScalingGroupOptions {
 class ImportedCluster extends Resource implements ICluster {
   public readonly vpc: ec2.IVpc;
   public readonly clusterCertificateAuthorityData: string;
+  public readonly clusterSecurityGroupId: string;
+  public readonly clusterEncryptionConfigKeyArn: string;
   public readonly clusterName: string;
   public readonly clusterArn: string;
   public readonly clusterEndpoint: string;
@@ -756,11 +1176,13 @@ class ImportedCluster extends Resource implements ICluster {
   constructor(scope: Construct, id: string, props: ClusterAttributes) {
     super(scope, id);
 
-    this.vpc = ec2.Vpc.fromVpcAttributes(this, "VPC", props.vpc);
+    this.vpc = ec2.Vpc.fromVpcAttributes(this, 'VPC', props.vpc);
     this.clusterName = props.clusterName;
     this.clusterEndpoint = props.clusterEndpoint;
     this.clusterArn = props.clusterArn;
     this.clusterCertificateAuthorityData = props.clusterCertificateAuthorityData;
+    this.clusterSecurityGroupId = props.clusterSecurityGroupId;
+    this.clusterEncryptionConfigKeyArn = props.clusterEncryptionConfigKeyArn;
 
     let i = 1;
     for (const sgProps of props.securityGroups) {
@@ -801,15 +1223,16 @@ export class EksOptimizedImage implements ec2.IMachineImage {
   /**
    * Constructs a new instance of the EcsOptimizedAmi class.
    */
-  public constructor(props: EksOptimizedImageProps) {
-    this.nodeType = props && props.nodeType;
-    this.kubernetesVersion = props && props.kubernetesVersion || LATEST_KUBERNETES_VERSION;
+  public constructor(props: EksOptimizedImageProps = {}) {
+    this.nodeType = props.nodeType ?? NodeType.STANDARD;
+    this.kubernetesVersion = props.kubernetesVersion ?? LATEST_KUBERNETES_VERSION;
 
     // set the SSM parameter name
     this.amiParameterName = `/aws/service/eks/optimized-ami/${this.kubernetesVersion}/`
-      + ( this.nodeType === NodeType.STANDARD ? "amazon-linux-2/" : "" )
-      + ( this.nodeType === NodeType.GPU ? " amazon-linux2-gpu/" : "" )
-      + "recommended/image_id";
+      + ( this.nodeType === NodeType.STANDARD ? 'amazon-linux-2/' : '' )
+      + ( this.nodeType === NodeType.GPU ? 'amazon-linux-2-gpu/' : '' )
+      + (this.nodeType === NodeType.INFERENTIA ? 'amazon-linux-2-gpu/' : '')
+      + 'recommended/image_id';
   }
 
   /**
@@ -819,7 +1242,40 @@ export class EksOptimizedImage implements ec2.IMachineImage {
     const ami = ssm.StringParameter.valueForStringParameter(scope, this.amiParameterName);
     return {
       imageId: ami,
-      osType: ec2.OperatingSystemType.LINUX
+      osType: ec2.OperatingSystemType.LINUX,
+      userData: ec2.UserData.forLinux(),
+    };
+  }
+}
+
+/**
+ * Construct an Bottlerocket image from the latest AMI published in SSM
+ */
+class BottleRocketImage implements ec2.IMachineImage {
+  private readonly kubernetesVersion?: string;
+
+  private readonly amiParameterName: string;
+
+  /**
+   * Constructs a new instance of the BottleRocketImage class.
+   */
+  public constructor() {
+    // only 1.15 is currently available
+    this.kubernetesVersion = '1.15';
+
+    // set the SSM parameter name
+    this.amiParameterName = `/aws/service/bottlerocket/aws-k8s-${this.kubernetesVersion}/x86_64/latest/image_id`;
+  }
+
+  /**
+   * Return the correct image
+   */
+  public getImage(scope: Construct): ec2.MachineImageConfig {
+    const ami = ssm.StringParameter.valueForStringParameter(scope, this.amiParameterName);
+    return {
+      imageId: ami,
+      osType: ec2.OperatingSystemType.LINUX,
+      userData: ec2.UserData.custom(''),
     };
   }
 }
@@ -840,8 +1296,61 @@ export enum NodeType {
    * GPU instances
    */
   GPU = 'GPU',
+
+  /**
+   * Inferentia instances
+   */
+  INFERENTIA = 'INFERENTIA',
 }
 
-export function nodeTypeForInstanceType(instanceType: ec2.InstanceType) {
-  return instanceType.toString().startsWith('p2') || instanceType.toString().startsWith('p3') ? NodeType.GPU : NodeType.STANDARD;
+/**
+ * The type of compute resources to use for CoreDNS.
+ */
+export enum CoreDnsComputeType {
+  /**
+   * Deploy CoreDNS on EC2 instances.
+   */
+  EC2 = 'ec2',
+
+  /**
+   * Deploy CoreDNS on Fargate-managed instances.
+   */
+  FARGATE = 'fargate'
+}
+
+/**
+ * The default capacity type for the cluster
+ */
+export enum DefaultCapacityType {
+  /**
+   * managed node group
+   */
+  NODEGROUP,
+  /**
+   * EC2 autoscaling group
+   */
+  EC2
+}
+
+/**
+ * The machine image type
+ */
+export enum MachineImageType {
+  /**
+   * Amazon EKS-optimized Linux AMI
+   */
+  AMAZON_LINUX_2,
+  /**
+   * Bottlerocket AMI
+   */
+  BOTTLEROCKET
+}
+
+const GPU_INSTANCETYPES = ['p2', 'p3', 'g4'];
+const INFERENTIA_INSTANCETYPES = ['inf1'];
+
+function nodeTypeForInstanceType(instanceType: ec2.InstanceType) {
+  return GPU_INSTANCETYPES.includes(instanceType.toString().substring(0, 2)) ? NodeType.GPU :
+    INFERENTIA_INSTANCETYPES.includes(instanceType.toString().substring(0, 4)) ? NodeType.INFERENTIA :
+      NodeType.STANDARD;
 }

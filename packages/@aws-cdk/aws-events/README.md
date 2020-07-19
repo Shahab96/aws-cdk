@@ -1,18 +1,18 @@
-## Amazon CloudWatch Events Construct Library
+## Amazon EventBridge Construct Library
 <!--BEGIN STABILITY BANNER-->
-
 ---
 
-![Stability: Stable](https://img.shields.io/badge/stability-Stable-success.svg?style=for-the-badge)
+![cfn-resources: Stable](https://img.shields.io/badge/cfn--resources-stable-success.svg?style=for-the-badge)
 
+![cdk-constructs: Stable](https://img.shields.io/badge/cdk--constructs-stable-success.svg?style=for-the-badge)
 
 ---
 <!--END STABILITY BANNER-->
 
-Amazon CloudWatch Events delivers a near real-time stream of system events that
+Amazon EventBridge delivers a near real-time stream of system events that
 describe changes in AWS resources. For example, an AWS CodePipeline emits the
 [State
-Change](https://docs.aws.amazon.com/AmazonCloudWatch/latest/events/EventTypes.html#codepipeline_event_type)
+Change](https://docs.aws.amazon.com/eventbridge/latest/userguide/event-types.html#codepipeline-event-type)
 event when the pipeline changes it's state.
 
 * __Events__: An event indicates a change in your AWS environment. AWS resources
@@ -21,11 +21,11 @@ event when the pipeline changes it's state.
   running, and Amazon EC2 Auto Scaling generates events when it launches or
   terminates instances. AWS CloudTrail publishes events when you make API calls.
   You can generate custom application-level events and publish them to
-  CloudWatch Events. You can also set up scheduled events that are generated on
+  EventBridge. You can also set up scheduled events that are generated on
   a periodic basis. For a list of services that generate events, and sample
-  events from each service, see [CloudWatch Events Event Examples From Each
+  events from each service, see [EventBridge Event Examples From Each
   Supported
-  Service](https://docs.aws.amazon.com/AmazonCloudWatch/latest/events/EventTypes.html).
+  Service](https://docs.aws.amazon.com/eventbridge/latest/userguide/event-types.html).
 * __Targets__: A target processes events. Targets can include Amazon EC2
   instances, AWS Lambda functions, Kinesis streams, Amazon ECS tasks, Step
   Functions state machines, Amazon SNS topics, Amazon SQS queues, and built-in
@@ -36,10 +36,15 @@ event when the pipeline changes it's state.
   enables different parts of an organization to look for and process the events
   that are of interest to them. A rule can customize the JSON sent to the
   target, by passing only certain parts or by overwriting it with a constant.
+* __EventBuses__: An event bus can receive events from your own custom applications
+  or it can receive events from applications and services created by AWS SaaS partners.
+  See [Creating an Event Bus](https://docs.aws.amazon.com/eventbridge/latest/userguide/create-event-bus.html).
 
-The `Rule` construct defines a CloudWatch events rule which monitors an
+## Rule
+
+The `Rule` construct defines an EventBridge rule which monitors an
 event based on an [event
-pattern](https://docs.aws.amazon.com/AmazonCloudWatch/latest/events/CloudWatchEventsandEventPatterns.html)
+pattern](https://docs.aws.amazon.com/eventbridge/latest/userguide/filtering-examples-structure.html)
 and invoke __event targets__ when the pattern is matched against a triggered
 event. Event targets are objects that implement the `IRuleTarget` interface.
 
@@ -59,7 +64,7 @@ const onCommitRule = repo.onCommit('OnCommit', {
 ```
 
 You can add additional targets, with optional [input
-transformer](https://docs.aws.amazon.com/AmazonCloudWatchEvents/latest/APIReference/API_InputTransformer.html)
+transformer](https://docs.aws.amazon.com/eventbridge/latest/APIReference/API_InputTransformer.html)
 using `eventRule.addTarget(target[, input])`. For example, we can add a SNS
 topic target which formats a human-readable message for the commit.
 
@@ -72,6 +77,27 @@ onCommitRule.addTarget(new targets.SnsTopic(topic, {
   )
 }));
 ```
+
+## Scheduling
+
+You can configure a Rule to run on a schedule (cron or rate). 
+
+The following example runs a task every day at 4am:
+
+```ts
+import { Rule, Schedule } from '@aws-cdk/aws-events';
+import { EcsTask } from '@aws-cdk/aws-events-targets';
+...
+
+const ecsTaskTarget = new EcsTask({ cluster, taskDefinition });
+
+new Rule(this, 'ScheduleRule', {
+ schedule: Schedule.cron({ minute: '0', hour: '4' }),
+ targets: [ecsTaskTarget],
+});
+```
+
+More details in [ScheduledEvents](https://docs.aws.amazon.com/eventbridge/latest/userguide/scheduled-events.html) documentation page.
 
 ## Event Targets
 
@@ -87,6 +113,7 @@ The following targets are supported:
 * `targets.SnsTopic`: Publish into an SNS topic
 * `targets.SqsQueue`: Send a message to an Amazon SQS Queue
 * `targets.SfnStateMachine`: Trigger an AWS Step Functions state machine
+* `targets.BatchJob`: Queue an AWS Batch Job
 * `targets.AwsApi`: Make an AWS API call
 
 ### Cross-account targets
@@ -95,9 +122,9 @@ It's possible to have the source of the event and a target in separate AWS accou
 
 ```typescript
 import { App, Stack } from '@aws-cdk/core';
-import codebuild = require('@aws-cdk/aws-codebuild');
-import codecommit = require('@aws-cdk/aws-codecommit');
-import targets = require('@aws-cdk/aws-events-targets');
+import * as codebuild from '@aws-cdk/aws-codebuild';
+import * as codecommit from '@aws-cdk/aws-codecommit';
+import * as targets from '@aws-cdk/aws-events-targets';
 
 const app = new App();
 
@@ -125,7 +152,7 @@ In this situation, the CDK will wire the 2 accounts together:
   and make sure its deployed before the source stack
 
 **Note**: while events can span multiple accounts, they _cannot_ span different regions
-(that is a CloudWatch, not CDK, limitation).
+(that is an EventBridge, not CDK, limitation).
 
 For more information, see the
-[AWS documentation on cross-account events](https://docs.aws.amazon.com/AmazonCloudWatch/latest/events/CloudWatchEvents-CrossAccountEventDelivery.html).
+[AWS documentation on cross-account events](https://docs.aws.amazon.com/eventbridge/latest/userguide/eventbridge-cross-account-event-delivery.html).

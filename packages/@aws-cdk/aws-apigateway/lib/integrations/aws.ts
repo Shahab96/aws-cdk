@@ -1,6 +1,5 @@
-import cdk = require('@aws-cdk/core');
-import { Stack } from '@aws-cdk/core';
-import { Integration, IntegrationOptions, IntegrationType } from '../integration';
+import * as cdk from '@aws-cdk/core';
+import { Integration, IntegrationConfig, IntegrationOptions, IntegrationType } from '../integration';
 import { Method } from '../method';
 import { parseAwsApiCall } from '../util';
 
@@ -81,7 +80,7 @@ export class AwsIntegration extends Integration {
       integrationHttpMethod: props.integrationHttpMethod || 'POST',
       uri: cdk.Lazy.stringValue({ produce: () => {
         if (!this.scope) { throw new Error('AwsIntegration must be used in API'); }
-        return Stack.of(this.scope).formatArn({
+        return cdk.Stack.of(this.scope).formatArn({
           service: 'apigateway',
           account: backend,
           resource: apiType,
@@ -93,7 +92,9 @@ export class AwsIntegration extends Integration {
     });
   }
 
-  public bind(method: Method) {
+  public bind(method: Method): IntegrationConfig {
+    const bindResult = super.bind(method);
     this.scope = method;
+    return bindResult;
   }
 }

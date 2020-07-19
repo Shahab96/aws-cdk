@@ -24,6 +24,23 @@ export class Fact {
   }
 
   /**
+   * Retrieve a fact from the Fact database. (retrieval will fail if the specified region or
+   * fact name does not exist.)
+   *
+   * @param region the name of the region (e.g: `us-east-1`)
+   * @param name the name of the fact being looked up (see the `FactName` class for details)
+   */
+  public static requireFact(region: string, name: string): string {
+    const foundFact = this.find(region, name);
+
+    if (!foundFact) {
+      throw new Error(`No fact ${name} could be found for region: ${region} and name: ${name}`);
+    }
+
+    return foundFact;
+  }
+
+  /**
    * Registers a new fact in this Fact database.
    *
    * @param fact           the new fact to be registered.
@@ -34,7 +51,9 @@ export class Fact {
     if (fact.name in regionFacts && regionFacts[fact.name] !== fact.value && !allowReplacing) {
       throw new Error(`Region ${fact.region} already has a fact ${fact.name}, with value ${regionFacts[fact.name]}`);
     }
-    regionFacts[fact.name] = fact.value;
+    if (fact.value !== undefined) {
+      regionFacts[fact.name] = fact.value;
+    }
   }
 
   /**
@@ -76,7 +95,7 @@ export interface IFact {
   /**
    * The value of this fact.
    */
-  readonly value: string;
+  readonly value: string | undefined;
 }
 
 /**
@@ -108,6 +127,18 @@ export class FactName {
    * The endpoint used for aliasing S3 static websites in Route 53
    */
   public static readonly S3_STATIC_WEBSITE_ZONE_53_HOSTED_ZONE_ID = 's3-static-website:route-53-hosted-zone-id';
+
+  /**
+   * The prefix for VPC Endpoint Service names,
+   * cn.com.amazonaws.vpce for China regions,
+   * com.amazonaws.vpce otherwise.
+   */
+  public static readonly VPC_ENDPOINT_SERVICE_NAME_PREFIX = 'vpcEndpointServiceNamePrefix';
+
+  /**
+   * The account for ELBv2 in this region
+   */
+  public static readonly ELBV2_ACCOUNT = 'elbv2Account';
 
   /**
    * The name of the regional service principal for a given service.

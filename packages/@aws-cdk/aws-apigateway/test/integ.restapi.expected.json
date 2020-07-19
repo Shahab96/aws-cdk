@@ -6,57 +6,6 @@
         "Name": "my-api"
       }
     },
-    "myapiDeployment92F2CB49a38a6824a90d7d4e6cc3a7f11357e163": {
-      "Type": "AWS::ApiGateway::Deployment",
-      "Properties": {
-        "RestApiId": {
-          "Ref": "myapi4C7BF186"
-        },
-        "Description": "Automatically created by the RestApi construct"
-      },
-      "DependsOn": [
-        "myapiv1appliancesGET8FE872EC",
-        "myapiv1appliances507FEFF4",
-        "myapiv1booksGETC6B996D0",
-        "myapiv1booksPOST53E2832E",
-        "myapiv1books1D4BE6C1",
-        "myapiv113487378",
-        "myapiv1toysGET7348114D",
-        "myapiv1toysPOST55128058",
-        "myapiv1toysPUT59AFBBC2",
-        "myapiv1toysA55FCBC4"
-      ],
-      "UpdateReplacePolicy": "Retain",
-      "DeletionPolicy": "Retain"
-    },
-    "myapiDeploymentStagebeta96434BEB": {
-      "Type": "AWS::ApiGateway::Stage",
-      "Properties": {
-        "RestApiId": {
-          "Ref": "myapi4C7BF186"
-        },
-        "CacheClusterEnabled": true,
-        "CacheClusterSize": "0.5",
-        "DeploymentId": {
-          "Ref": "myapiDeployment92F2CB49a38a6824a90d7d4e6cc3a7f11357e163"
-        },
-        "Description": "beta stage",
-        "MethodSettings": [
-          {
-            "DataTraceEnabled": true,
-            "HttpMethod": "*",
-            "LoggingLevel": "INFO",
-            "ResourcePath": "/*"
-          },
-          {
-            "CachingEnabled": true,
-            "HttpMethod": "GET",
-            "ResourcePath": "/~1api~1appliances"
-          }
-        ],
-        "StageName": "beta"
-      }
-    },
     "myapiCloudWatchRole095452E5": {
       "Type": "AWS::IAM::Role",
       "Properties": {
@@ -102,6 +51,57 @@
         "myapi4C7BF186"
       ]
     },
+    "myapiDeployment92F2CB4963d40685c54c6f8da21d80a83f16d3d5": {
+      "Type": "AWS::ApiGateway::Deployment",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "myapi4C7BF186"
+        },
+        "Description": "Automatically created by the RestApi construct"
+      },
+      "DependsOn": [
+        "myapiv1appliancesGET8FE872EC",
+        "myapiv1appliances507FEFF4",
+        "myapiv1booksGETC6B996D0",
+        "myapiv1booksPOST53E2832E",
+        "myapiv1books1D4BE6C1",
+        "myapiv113487378",
+        "myapiv1toysGET7348114D",
+        "myapiv1toysPOST55128058",
+        "myapiv1toysPUT59AFBBC2",
+        "myapiv1toysA55FCBC4"
+      ],
+      "UpdateReplacePolicy": "Retain",
+      "DeletionPolicy": "Retain"
+    },
+    "myapiDeploymentStagebeta96434BEB": {
+      "Type": "AWS::ApiGateway::Stage",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "myapi4C7BF186"
+        },
+        "CacheClusterEnabled": true,
+        "CacheClusterSize": "0.5",
+        "DeploymentId": {
+          "Ref": "myapiDeployment92F2CB4963d40685c54c6f8da21d80a83f16d3d5"
+        },
+        "Description": "beta stage",
+        "MethodSettings": [
+          {
+            "DataTraceEnabled": true,
+            "HttpMethod": "*",
+            "LoggingLevel": "INFO",
+            "ResourcePath": "/*"
+          },
+          {
+            "CachingEnabled": true,
+            "HttpMethod": "GET",
+            "ResourcePath": "/~1api~1appliances"
+          }
+        ],
+        "StageName": "beta"
+      }
+    },
     "myapiv113487378": {
       "Type": "AWS::ApiGateway::Resource",
       "Properties": {
@@ -126,6 +126,84 @@
         "PathPart": "toys",
         "RestApiId": {
           "Ref": "myapi4C7BF186"
+        }
+      }
+    },
+    "myapiv1toysGETApiPermissiontestapigatewayrestapimyapi1AE401C4GETv1toysA829D1CC": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "MyHandler6B74D312",
+            "Arn"
+          ]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":execute-api:",
+              {
+                "Ref": "AWS::Region"
+              },
+              ":",
+              {
+                "Ref": "AWS::AccountId"
+              },
+              ":",
+              {
+                "Ref": "myapi4C7BF186"
+              },
+              "/",
+              {
+                "Ref": "myapiDeploymentStagebeta96434BEB"
+              },
+              "/GET/v1/toys"
+            ]
+          ]
+        }
+      }
+    },
+    "myapiv1toysGETApiPermissionTesttestapigatewayrestapimyapi1AE401C4GETv1toys9E0BAE9F": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "MyHandler6B74D312",
+            "Arn"
+          ]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":execute-api:",
+              {
+                "Ref": "AWS::Region"
+              },
+              ":",
+              {
+                "Ref": "AWS::AccountId"
+              },
+              ":",
+              {
+                "Ref": "myapi4C7BF186"
+              },
+              "/test-invoke-stage/GET/v1/toys"
+            ]
+          ]
         }
       }
     },
@@ -242,6 +320,84 @@
         }
       }
     },
+    "myapiv1booksGETApiPermissiontestapigatewayrestapimyapi1AE401C4GETv1books484ACD3F": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "MyHandler6B74D312",
+            "Arn"
+          ]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":execute-api:",
+              {
+                "Ref": "AWS::Region"
+              },
+              ":",
+              {
+                "Ref": "AWS::AccountId"
+              },
+              ":",
+              {
+                "Ref": "myapi4C7BF186"
+              },
+              "/",
+              {
+                "Ref": "myapiDeploymentStagebeta96434BEB"
+              },
+              "/GET/v1/books"
+            ]
+          ]
+        }
+      }
+    },
+    "myapiv1booksGETApiPermissionTesttestapigatewayrestapimyapi1AE401C4GETv1booksE255E31A": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "MyHandler6B74D312",
+            "Arn"
+          ]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":execute-api:",
+              {
+                "Ref": "AWS::Region"
+              },
+              ":",
+              {
+                "Ref": "AWS::AccountId"
+              },
+              ":",
+              {
+                "Ref": "myapi4C7BF186"
+              },
+              "/test-invoke-stage/GET/v1/books"
+            ]
+          ]
+        }
+      }
+    },
     "myapiv1booksGETC6B996D0": {
       "Type": "AWS::ApiGateway::Method",
       "Properties": {
@@ -279,6 +435,84 @@
               ]
             ]
           }
+        }
+      }
+    },
+    "myapiv1booksPOSTApiPermissiontestapigatewayrestapimyapi1AE401C4POSTv1books2B1BC62B": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "MyHandler6B74D312",
+            "Arn"
+          ]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":execute-api:",
+              {
+                "Ref": "AWS::Region"
+              },
+              ":",
+              {
+                "Ref": "AWS::AccountId"
+              },
+              ":",
+              {
+                "Ref": "myapi4C7BF186"
+              },
+              "/",
+              {
+                "Ref": "myapiDeploymentStagebeta96434BEB"
+              },
+              "/POST/v1/books"
+            ]
+          ]
+        }
+      }
+    },
+    "myapiv1booksPOSTApiPermissionTesttestapigatewayrestapimyapi1AE401C4POSTv1books816A6B37": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "MyHandler6B74D312",
+            "Arn"
+          ]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":execute-api:",
+              {
+                "Ref": "AWS::Region"
+              },
+              ":",
+              {
+                "Ref": "AWS::AccountId"
+              },
+              ":",
+              {
+                "Ref": "myapi4C7BF186"
+              },
+              "/test-invoke-stage/POST/v1/books"
+            ]
+          ]
         }
       }
     },
@@ -415,7 +649,7 @@
       "Type": "AWS::Lambda::Function",
       "Properties": {
         "Code": {
-          "ZipFile": "exports.handler = function handlerCode(event, _, callback) {\n            return callback(undefined, {\n                isBase64Encoded: false,\n                statusCode: 200,\n                headers: { 'content-type': 'application/json' },\n                body: JSON.stringify(event)\n            });\n        }"
+          "ZipFile": "exports.handler = function handlerCode(event, _, callback) {\n            return callback(undefined, {\n                isBase64Encoded: false,\n                statusCode: 200,\n                headers: { 'content-type': 'application/json' },\n                body: JSON.stringify(event),\n            });\n        }"
         },
         "Handler": "index.handler",
         "Role": {
@@ -424,245 +658,11 @@
             "Arn"
           ]
         },
-        "Runtime": "nodejs8.10"
+        "Runtime": "nodejs10.x"
       },
       "DependsOn": [
         "MyHandlerServiceRoleFFA06653"
       ]
-    },
-    "myapiv1toysGETApiPermissiontestapigatewayrestapimyapi1AE401C4GETv1toysA829D1CC": {
-      "Type": "AWS::Lambda::Permission",
-      "Properties": {
-        "Action": "lambda:InvokeFunction",
-        "FunctionName": {
-          "Fn::GetAtt": [
-            "MyHandler6B74D312",
-            "Arn"
-          ]
-        },
-        "Principal": "apigateway.amazonaws.com",
-        "SourceArn": {
-          "Fn::Join": [
-            "",
-            [
-              "arn:",
-              {
-                "Ref": "AWS::Partition"
-              },
-              ":execute-api:",
-              {
-                "Ref": "AWS::Region"
-              },
-              ":",
-              {
-                "Ref": "AWS::AccountId"
-              },
-              ":",
-              {
-                "Ref": "myapi4C7BF186"
-              },
-              "/",
-              {
-                "Ref": "myapiDeploymentStagebeta96434BEB"
-              },
-              "/GET/v1/toys"
-            ]
-          ]
-        }
-      }
-    },
-    "myapiv1toysGETApiPermissionTesttestapigatewayrestapimyapi1AE401C4GETv1toys9E0BAE9F": {
-      "Type": "AWS::Lambda::Permission",
-      "Properties": {
-        "Action": "lambda:InvokeFunction",
-        "FunctionName": {
-          "Fn::GetAtt": [
-            "MyHandler6B74D312",
-            "Arn"
-          ]
-        },
-        "Principal": "apigateway.amazonaws.com",
-        "SourceArn": {
-          "Fn::Join": [
-            "",
-            [
-              "arn:",
-              {
-                "Ref": "AWS::Partition"
-              },
-              ":execute-api:",
-              {
-                "Ref": "AWS::Region"
-              },
-              ":",
-              {
-                "Ref": "AWS::AccountId"
-              },
-              ":",
-              {
-                "Ref": "myapi4C7BF186"
-              },
-              "/test-invoke-stage/GET/v1/toys"
-            ]
-          ]
-        }
-      }
-    },
-    "myapiv1booksGETApiPermissiontestapigatewayrestapimyapi1AE401C4GETv1books484ACD3F": {
-      "Type": "AWS::Lambda::Permission",
-      "Properties": {
-        "Action": "lambda:InvokeFunction",
-        "FunctionName": {
-          "Fn::GetAtt": [
-            "MyHandler6B74D312",
-            "Arn"
-          ]
-        },
-        "Principal": "apigateway.amazonaws.com",
-        "SourceArn": {
-          "Fn::Join": [
-            "",
-            [
-              "arn:",
-              {
-                "Ref": "AWS::Partition"
-              },
-              ":execute-api:",
-              {
-                "Ref": "AWS::Region"
-              },
-              ":",
-              {
-                "Ref": "AWS::AccountId"
-              },
-              ":",
-              {
-                "Ref": "myapi4C7BF186"
-              },
-              "/",
-              {
-                "Ref": "myapiDeploymentStagebeta96434BEB"
-              },
-              "/GET/v1/books"
-            ]
-          ]
-        }
-      }
-    },
-    "myapiv1booksGETApiPermissionTesttestapigatewayrestapimyapi1AE401C4GETv1booksE255E31A": {
-      "Type": "AWS::Lambda::Permission",
-      "Properties": {
-        "Action": "lambda:InvokeFunction",
-        "FunctionName": {
-          "Fn::GetAtt": [
-            "MyHandler6B74D312",
-            "Arn"
-          ]
-        },
-        "Principal": "apigateway.amazonaws.com",
-        "SourceArn": {
-          "Fn::Join": [
-            "",
-            [
-              "arn:",
-              {
-                "Ref": "AWS::Partition"
-              },
-              ":execute-api:",
-              {
-                "Ref": "AWS::Region"
-              },
-              ":",
-              {
-                "Ref": "AWS::AccountId"
-              },
-              ":",
-              {
-                "Ref": "myapi4C7BF186"
-              },
-              "/test-invoke-stage/GET/v1/books"
-            ]
-          ]
-        }
-      }
-    },
-    "myapiv1booksPOSTApiPermissiontestapigatewayrestapimyapi1AE401C4POSTv1books2B1BC62B": {
-      "Type": "AWS::Lambda::Permission",
-      "Properties": {
-        "Action": "lambda:InvokeFunction",
-        "FunctionName": {
-          "Fn::GetAtt": [
-            "MyHandler6B74D312",
-            "Arn"
-          ]
-        },
-        "Principal": "apigateway.amazonaws.com",
-        "SourceArn": {
-          "Fn::Join": [
-            "",
-            [
-              "arn:",
-              {
-                "Ref": "AWS::Partition"
-              },
-              ":execute-api:",
-              {
-                "Ref": "AWS::Region"
-              },
-              ":",
-              {
-                "Ref": "AWS::AccountId"
-              },
-              ":",
-              {
-                "Ref": "myapi4C7BF186"
-              },
-              "/",
-              {
-                "Ref": "myapiDeploymentStagebeta96434BEB"
-              },
-              "/POST/v1/books"
-            ]
-          ]
-        }
-      }
-    },
-    "myapiv1booksPOSTApiPermissionTesttestapigatewayrestapimyapi1AE401C4POSTv1books816A6B37": {
-      "Type": "AWS::Lambda::Permission",
-      "Properties": {
-        "Action": "lambda:InvokeFunction",
-        "FunctionName": {
-          "Fn::GetAtt": [
-            "MyHandler6B74D312",
-            "Arn"
-          ]
-        },
-        "Principal": "apigateway.amazonaws.com",
-        "SourceArn": {
-          "Fn::Join": [
-            "",
-            [
-              "arn:",
-              {
-                "Ref": "AWS::Partition"
-              },
-              ":execute-api:",
-              {
-                "Ref": "AWS::Region"
-              },
-              ":",
-              {
-                "Ref": "AWS::AccountId"
-              },
-              ":",
-              {
-                "Ref": "myapi4C7BF186"
-              },
-              "/test-invoke-stage/POST/v1/books"
-            ]
-          ]
-        }
-      }
     }
   },
   "Outputs": {

@@ -49,6 +49,16 @@ export enum InstanceClass {
   M5D = 'm5d',
 
   /**
+   * Standard instances based on AMD EPYC, 5th generation
+   */
+  STANDARD5_AMD = 'm5a',
+
+  /**
+   * Standard instances based on AMD EPYC, 5th generation
+   */
+  M5A = 'm5a',
+
+  /**
    * Standard instances based on AMD EPYC with local NVME drive, 5th generation
    */
   STANDARD5_AMD_NVME_DRIVE = 'm5ad',
@@ -89,6 +99,36 @@ export enum InstanceClass {
   R5 = 'r5',
 
   /**
+   * Memory optimized instances for high performance computing, 5th generation
+   */
+  MEMORY5_HIGH_PERFORMANCE = 'r5n',
+
+  /**
+   * Memory optimized instances for high performance computing, 5th generation
+   */
+  R5N = 'r5n',
+
+  /**
+   * Memory optimized instances with local NVME drive, 5th generation
+   */
+  MEMORY5_NVME_DRIVE = 'r5d',
+
+  /**
+   * Memory optimized instances with local NVME drive, 5th generation
+   */
+  R5D = 'r5d',
+
+  /**
+   * Memory optimized instances with local NVME drive for high performance computing, 5th generation
+   */
+  MEMORY5_NVME_DRIVE_HIGH_PERFORMANCE = 'r5dn',
+
+  /**
+   * Memory optimized instances with local NVME drive for high performance computing, 5th generation
+   */
+  R5DN = 'r5dn',
+
+  /**
    * Memory optimized instances based on AMD EPYC, 5th generation
    */
   MEMORY5_AMD = 'r5a',
@@ -97,6 +137,16 @@ export enum InstanceClass {
    * Memory optimized instances based on AMD EPYC, 5th generation
    */
   R5A = 'r5a',
+
+  /**
+   * Memory optimized instances based on AMD EPYC with local NVME drive, 5th generation
+   */
+  MEMORY5_AMD_NVME_DRIVE = 'r5a',
+
+  /**
+   * Memory optimized instances based on AMD EPYC with local NVME drive, 5th generation
+   */
+  R5AD = 'r5a',
 
   /**
    * Compute optimized instances, 3rd generation
@@ -259,6 +309,16 @@ export enum InstanceClass {
   G3 = 'g3',
 
   /**
+   * Graphics-optimized instances with NVME drive for high performance computing, 4th generation
+   */
+  GRAPHICS4_NVME_DRIVE_HIGH_PERFORMANCE = 'g4dn',
+
+  /**
+   * Graphics-optimized instances with NVME drive for high performance computing, 4th generation
+   */
+  G4DN = 'g4dn',
+
+  /**
    * Parallel-processing optimized instances, 2nd generation
    */
   PARALLEL2 = 'p2',
@@ -289,6 +349,16 @@ export enum InstanceClass {
   A1 = 'a1',
 
   /**
+   * Arm processor based instances, 2nd generation
+   */
+  STANDARD6_GRAVITON = 'm6g',
+
+  /**
+   * Arm processor based instances, 2nd generation
+   */
+  M6G = 'm6g',
+
+  /**
    * High memory and compute capacity instances, 1st generation
    */
   HIGH_COMPUTE_MEMORY1 = 'z1d',
@@ -297,29 +367,112 @@ export enum InstanceClass {
    * High memory and compute capacity instances, 1st generation
    */
   Z1D = 'z1d',
+
+  /**
+   * Inferentia Chips based instances for machine learning inference applications, 1st generation
+   */
+  INFERENCE1 = 'inf1',
+
+  /**
+   * Inferentia Chips based instances for machine learning inference applications, 1st generation
+   */
+  INF1 = 'inf1'
 }
 
 /**
  * What size of instance to use
  */
 export enum InstanceSize {
+  /**
+   * Instance size NANO (nano)
+   */
   NANO = 'nano',
+
+  /**
+   * Instance size MICRO (micro)
+   */
   MICRO = 'micro',
+
+  /**
+   * Instance size SMALL (small)
+   */
   SMALL = 'small',
+
+  /**
+   * Instance size MEDIUM (medium)
+   */
   MEDIUM = 'medium',
+
+  /**
+   * Instance size LARGE (large)
+   */
   LARGE = 'large',
+
+  /**
+   * Instance size XLARGE (xlarge)
+   */
   XLARGE = 'xlarge',
+
+  /**
+   * Instance size XLARGE2 (2xlarge)
+   */
   XLARGE2 = '2xlarge',
+
+  /**
+   * Instance size XLARGE4 (4xlarge)
+   */
   XLARGE4 = '4xlarge',
+
+  /**
+   * Instance size XLARGE6 (6xlarge)
+   */
+  XLARGE6 = '6xlarge',
+
+  /**
+   * Instance size XLARGE8 (8xlarge)
+   */
   XLARGE8 = '8xlarge',
+
+  /**
+   * Instance size XLARGE9 (9xlarge)
+   */
   XLARGE9 = '9xlarge',
+
+  /**
+   * Instance size XLARGE10 (10xlarge)
+   */
   XLARGE10 = '10xlarge',
+
+  /**
+   * Instance size XLARGE12 (12xlarge)
+   */
   XLARGE12 = '12xlarge',
+
+  /**
+   * Instance size XLARGE16 (16xlarge)
+   */
   XLARGE16 = '16xlarge',
+
+  /**
+   * Instance size XLARGE18 (18xlarge)
+   */
   XLARGE18 = '18xlarge',
+
+  /**
+   * Instance size XLARGE24 (24xlarge)
+   */
   XLARGE24 = '24xlarge',
+
+  /**
+   * Instance size XLARGE32 (32xlarge)
+   */
   XLARGE32 = '32xlarge',
+
+  /**
+   * Instance size METAL (metal)
+   */
   METAL = 'metal',
+
 }
 
 /**

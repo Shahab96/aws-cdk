@@ -1,7 +1,7 @@
-import { expect, haveResource } from '@aws-cdk/assert';
-import cdk = require('@aws-cdk/core');
+import { expect, haveResource, haveResourceLike, ResourcePart } from '@aws-cdk/assert';
+import * as cdk from '@aws-cdk/core';
 import { Test } from 'nodeunit';
-import s3 = require('../lib');
+import * as s3 from '../lib';
 
 export = {
   'when notification are added, a custom resource is provisioned + a lambda handler for it'(test: Test) {
@@ -12,8 +12,8 @@ export = {
     bucket.addEventNotification(s3.EventType.OBJECT_CREATED, {
       bind: () => ({
         arn: 'ARN',
-        type: s3.BucketNotificationDestinationType.TOPIC
-      })
+        type: s3.BucketNotificationDestinationType.TOPIC,
+      }),
     });
 
     expect(stack).to(haveResource('AWS::S3::Bucket'));
@@ -30,7 +30,7 @@ export = {
     bucket.addEventNotification(s3.EventType.OBJECT_CREATED, {
       bind: () => ({
         arn: 'ARN',
-        type: s3.BucketNotificationDestinationType.TOPIC
+        type: s3.BucketNotificationDestinationType.TOPIC,
       }),
     }, { prefix: 'images/', suffix: '.png' });
 
@@ -39,27 +39,55 @@ export = {
         TopicConfigurations: [
           {
             Events: [
-              's3:ObjectCreated:*'
+              's3:ObjectCreated:*',
             ],
             Filter: {
               Key: {
                 FilterRules: [
                   {
                     Name: 'suffix',
-                    Value: '.png'
+                    Value: '.png',
                   },
                   {
                     Name: 'prefix',
-                    Value: 'images/'
-                  }
-                ]
-              }
+                    Value: 'images/',
+                  },
+                ],
+              },
             },
-            TopicArn: 'ARN'
-          }
-        ]
-      }
+            TopicArn: 'ARN',
+          },
+        ],
+      },
     }));
+
+    test.done();
+  },
+
+  'the notification lambda handler must depend on the role to prevent executing too early'(test: Test) {
+    const stack = new cdk.Stack();
+
+    const bucket = new s3.Bucket(stack, 'MyBucket');
+
+    bucket.addEventNotification(s3.EventType.OBJECT_CREATED, {
+      bind: () => ({
+        arn: 'ARN',
+        type: s3.BucketNotificationDestinationType.TOPIC,
+      }),
+    });
+
+    expect(stack).to(haveResourceLike('AWS::Lambda::Function', {
+      Type: 'AWS::Lambda::Function',
+      Properties: {
+        Role: {
+          'Fn::GetAtt': [
+            'BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleB6FB88EC',
+            'Arn',
+          ],
+        },
+      }, DependsOn: [ 'BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleDefaultPolicy2CF63D36',
+        'BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleB6FB88EC' ],
+    }, ResourcePart.CompleteDefinition ) );
 
     test.done();
   },
@@ -72,7 +100,7 @@ export = {
     test.throws(() => bucket.addEventNotification(s3.EventType.OBJECT_CREATED, {
       bind: () => ({
         arn: 'ARN',
-        type: s3.BucketNotificationDestinationType.TOPIC
+        type: s3.BucketNotificationDestinationType.TOPIC,
       }),
     }, { prefix: 'images/'}, { prefix: 'archive/' }), /prefix rule/);
 
@@ -87,10 +115,10 @@ export = {
     test.throws(() => bucket.addEventNotification(s3.EventType.OBJECT_CREATED, {
       bind: () => ({
         arn: 'ARN',
-        type: s3.BucketNotificationDestinationType.TOPIC
+        type: s3.BucketNotificationDestinationType.TOPIC,
       }),
     }, { suffix: '.png'}, { suffix: '.zip' }), /suffix rule/);
 
     test.done();
-  }
+  },
 };

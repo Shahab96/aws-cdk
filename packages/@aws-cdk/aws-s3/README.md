@@ -1,10 +1,10 @@
 ## Amazon S3 Construct Library
 <!--BEGIN STABILITY BANNER-->
-
 ---
 
-![Stability: Stable](https://img.shields.io/badge/stability-Stable-success.svg?style=for-the-badge)
+![cfn-resources: Stable](https://img.shields.io/badge/cfn--resources-stable-success.svg?style=for-the-badge)
 
+![cdk-constructs: Stable](https://img.shields.io/badge/cdk--constructs-stable-success.svg?style=for-the-badge)
 
 ---
 <!--END STABILITY BANNER-->
@@ -29,8 +29,10 @@ new Bucket(this, 'MyFirstBucket');
  * `arnForObjects(pattern)` - the ARN of an object or objects within the bucket (i.e.
    `arn:aws:s3:::bucket_name/exampleobject.png` or
    `arn:aws:s3:::bucket_name/Development/*`)
- * `urlForObject(key)` - the URL of an object within the bucket (i.e.
+ * `urlForObject(key)` - the HTTP URL of an object within the bucket (i.e.
    `https://s3.cn-north-1.amazonaws.com.cn/china-bucket/mykey`)
+ * `s3UrlForObject(key)` - the S3 URL of an object within the bucket (i.e.
+   `s3://bucket/mykey`)
 
 ### Encryption
 
@@ -80,6 +82,13 @@ bucket.addToResourcePolicy(new iam.PolicyStatement({
   resources: [bucket.arnForObjects('file.txt')],
   principals: [new iam.AccountRootPrincipal()],
 }));
+```
+
+The bucket policy can be directly accessed after creation to add statements or
+adjust the removal policy.
+
+```ts
+bucket.policy?.applyRemovalPolicy(RemovalPolicy.RETAIN);
 ```
 
 Most of the time, you won't have to manipulate the bucket policy directly.
@@ -139,7 +148,7 @@ these common use cases.
 The following example will subscribe an SNS topic to be notified of all `s3:ObjectCreated:*` events:
 
 ```ts
-import s3n = require('@aws-cdk/aws-s3-notifications');
+import * as s3n from '@aws-cdk/aws-s3-notifications';
 
 const myTopic = new sns.Topic(this, 'MyTopic');
 bucket.addEventNotification(s3.EventType.OBJECT_CREATED, new s3n.SnsDestination(topic));
@@ -192,6 +201,28 @@ When `blockPublicPolicy` is set to `true`, `grantPublicRead()` throws an error.
 
 [block public access settings]: https://docs.aws.amazon.com/AmazonS3/latest/dev/access-control-block-public-access.html
 
+### Logging configuration
+
+Use `serverAccessLogsBucket` to describe where server access logs are to be stored.
+
+```ts
+const accessLogsBucket = new Bucket(this, 'AccessLogsBucket');
+
+const bucket = new Bucket(this, 'MyBucket', {
+  serverAccessLogsBucket: accessLogsBucket,
+});
+```
+
+It's also possible to specify a prefix for Amazon S3 to assign to all log object keys.
+
+```ts
+const bucket = new Bucket(this, 'MyBucket', {
+  serverAccessLogsBucket: accessLogsBucket,
+  serverAccessLogsPrefix: 'logs'
+});
+```
+
+[S3 Server access logging]: https://docs.aws.amazon.com/AmazonS3/latest/dev/ServerLogs.html
 
 ### Website redirection
 

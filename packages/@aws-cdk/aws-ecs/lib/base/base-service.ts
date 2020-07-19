@@ -1,10 +1,10 @@
-import appscaling = require('@aws-cdk/aws-applicationautoscaling');
-import cloudwatch = require('@aws-cdk/aws-cloudwatch');
-import ec2 = require('@aws-cdk/aws-ec2');
-import elb = require('@aws-cdk/aws-elasticloadbalancing');
-import elbv2 = require('@aws-cdk/aws-elasticloadbalancingv2');
-import iam = require('@aws-cdk/aws-iam');
-import cloudmap = require('@aws-cdk/aws-servicediscovery');
+import * as appscaling from '@aws-cdk/aws-applicationautoscaling';
+import * as cloudwatch from '@aws-cdk/aws-cloudwatch';
+import * as ec2 from '@aws-cdk/aws-ec2';
+import * as elb from '@aws-cdk/aws-elasticloadbalancing';
+import * as elbv2 from '@aws-cdk/aws-elasticloadbalancingv2';
+import * as iam from '@aws-cdk/aws-iam';
+import * as cloudmap from '@aws-cdk/aws-servicediscovery';
 import { Construct, Duration, IResolvable, IResource, Lazy, Resource, Stack } from '@aws-cdk/core';
 import { LoadBalancerTargetOptions, NetworkMode, TaskDefinition } from '../base/task-definition';
 import { ICluster } from '../cluster';
@@ -22,6 +22,25 @@ export interface IService extends IResource {
    * @attribute
    */
   readonly serviceArn: string;
+
+  /**
+   * The name of the service.
+   *
+   * @attribute
+   */
+  readonly serviceName: string;
+}
+
+/**
+ * The deployment controller to use for the service.
+ */
+export interface DeploymentController {
+  /**
+   * The deployment controller type to use.
+   *
+   * @default DeploymentControllerType.ECS
+   */
+  readonly type?: DeploymentControllerType;
 }
 
 export interface EcsTarget {
@@ -133,6 +152,14 @@ export interface BaseServiceOptions {
    * @default false
    */
   readonly enableECSManagedTags?: boolean;
+
+  /**
+   * Specifies which deployment controller to use for the service. For more information, see
+   * [Amazon ECS Deployment Types](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-types.html)
+   *
+   * @default - Rolling update (ECS)
+   */
+  readonly deploymentController?: DeploymentController;
 }
 
 /**
@@ -192,10 +219,10 @@ class ApplicationListenerConfig extends ListenerConfig {
       ... props,
       targets: [
         service.loadBalancerTarget({
-          ...target
-        })
+          ...target,
+        }),
       ],
-      port
+      port,
     });
   }
 }
@@ -217,19 +244,29 @@ class NetworkListenerConfig extends ListenerConfig {
       ... this.props,
       targets: [
         service.loadBalancerTarget({
-          ...target
-        })
+          ...target,
+        }),
       ],
-      port
+      port,
     });
   }
+}
+
+/**
+ * The interface for BaseService.
+ */
+export interface IBaseService extends IService {
+  /**
+   * The cluster that hosts the service.
+   */
+  readonly cluster: ICluster;
 }
 
 /**
  * The base class for Ec2Service and FargateService services.
  */
 export abstract class BaseService extends Resource
-  implements IService, elbv2.IApplicationLoadBalancerTarget, elbv2.INetworkLoadBalancerTarget, elb.ILoadBalancerTarget {
+  implements IBaseService, elbv2.IApplicationLoadBalancerTarget, elbv2.INetworkLoadBalancerTarget, elb.ILoadBalancerTarget {
 
   /**
    * The security groups which manage the allowed network traffic for the service.
@@ -287,34 +324,40 @@ export abstract class BaseService extends Resource
   /**
    * Constructs a new instance of the BaseService class.
    */
-  constructor(scope: Construct,
-              id: string,
-              props: BaseServiceProps,
-              additionalProps: any,
-              taskDefinition: TaskDefinition) {
+  constructor(
+    scope: Construct,
+    id: string,
+    props: BaseServiceProps,
+    additionalProps: any,
+    taskDefinition: TaskDefinition) {
     super(scope, id, {
       physicalName: props.serviceName,
     });
 
     this.taskDefinition = taskDefinition;
 
-    this.resource = new CfnService(this, "Service", {
+    this.resource = new CfnService(this, 'Service', {
       desiredCount: props.desiredCount,
       serviceName: this.physicalName,
       loadBalancers: Lazy.anyValue({ produce: () => this.loadBalancers }, { omitEmptyArray: true }),
       deploymentConfiguration: {
         maximumPercent: props.maxHealthyPercent || 200,
-        minimumHealthyPercent: props.minHealthyPercent === undefined ? 50 : props.minHealthyPercent
+        minimumHealthyPercent: props.minHealthyPercent === undefined ? 50 : props.minHealthyPercent,
       },
       propagateTags: props.propagateTags === PropagatedTagSource.NONE ? undefined : props.propagateTags,
       enableEcsManagedTags: props.enableECSManagedTags === undefined ? false : props.enableECSManagedTags,
-      launchType: props.launchType,
+      deploymentController: props.deploymentController,
+      launchType: props.deploymentController?.type === DeploymentControllerType.EXTERNAL ? undefined : props.launchType,
       healthCheckGracePeriodSeconds: this.evaluateHealthGracePeriod(props.healthCheckGracePeriod),
       /* role: never specified, supplanted by Service Linked Role */
       networkConfiguration: Lazy.anyValue({ produce: () => this.networkConfiguration }, { omitEmptyArray: true }),
       serviceRegistries: Lazy.anyValue({ produce: () => this.serviceRegistries }, { omitEmptyArray: true }),
-      ...additionalProps
+      ...additionalProps,
     });
+
+    if (props.deploymentController?.type === DeploymentControllerType.EXTERNAL) {
+      this.node.addWarning('taskDefinition and launchType are blanked out when using external deployment controller.');
+    }
 
     this.serviceArn = this.getResourceArnAttribute(this.resource.ref, {
       service: 'ecs',
@@ -368,10 +411,13 @@ export abstract class BaseService extends Resource
    *
    * @example
    *
-   * listener.addTarget(service.loadBalancerTarget({
-   *   containerName: 'MyContainer',
-   *   containerPort: 1234
-   * }));
+   * listener.addTargets('ECS', {
+   *   port: 80,
+   *   targets: [service.loadBalancerTarget({
+   *     containerName: 'MyContainer',
+   *     containerPort: 1234,
+   *   })],
+   * });
    */
   public loadBalancerTarget(options: LoadBalancerTargetOptions): IEcsLoadBalancerTarget {
     const self = this;
@@ -388,7 +434,7 @@ export abstract class BaseService extends Resource
       connections,
       attachToClassicLB(loadBalancer: elb.LoadBalancer): void {
         return self.attachToELB(loadBalancer, target.containerName, target.portMapping.containerPort);
-      }
+      },
     };
   }
 
@@ -396,15 +442,15 @@ export abstract class BaseService extends Resource
    * Use this function to create all load balancer targets to be registered in this service, add them to
    * target groups, and attach target groups to listeners accordingly.
    *
+   * Alternatively, you can use `listener.addTargets()` to create targets and add them to target groups.
+   *
    * @example
    *
    * service.registerLoadBalancerTargets(
    *   {
-   *     containerTarget: {
-   *       containerName: 'web',
-   *       containerPort: 80,
-   *     },
-   *     targetGroupId: 'ECS',
+   *     containerName: 'web',
+   *     containerPort: 80,
+   *     newTargetGroupId: 'ECS',
    *     listener: ecs.ListenerConfig.applicationListener(listener, {
    *       protocol: elbv2.ApplicationProtocol.HTTPS
    *     }),
@@ -416,7 +462,7 @@ export abstract class BaseService extends Resource
       target.listener.addTargets(target.newTargetGroupId, {
         containerName: target.containerName,
         containerPort: target.containerPort,
-        protocol: target.protocol
+        protocol: target.protocol,
       }, this);
     }
   }
@@ -444,7 +490,7 @@ export abstract class BaseService extends Resource
       resourceId: `service/${this.cluster.clusterName}/${this.serviceName}`,
       dimension: 'ecs:service:DesiredCount',
       role: this.makeAutoScalingRole(),
-      ...props
+      ...props,
     });
   }
 
@@ -454,15 +500,15 @@ export abstract class BaseService extends Resource
    * @returns The created CloudMap service
    */
   public enableCloudMap(options: CloudMapOptions): cloudmap.Service {
-    const sdNamespace = this.cluster.defaultCloudMapNamespace;
+    const sdNamespace = options.cloudMapNamespace !== undefined ? options.cloudMapNamespace : this.cluster.defaultCloudMapNamespace;
     if (sdNamespace === undefined) {
-      throw new Error("Cannot enable service discovery if a Cloudmap Namespace has not been created in the cluster.");
+      throw new Error('Cannot enable service discovery if a Cloudmap Namespace has not been created in the cluster.');
     }
 
     // Determine DNS type based on network mode
     const networkMode = this.taskDefinition.networkMode;
     if (networkMode === NetworkMode.NONE) {
-      throw new Error("Cannot use a service discovery if NetworkMode is None. Use Bridge, Host or AwsVpc instead.");
+      throw new Error('Cannot use a service discovery if NetworkMode is None. Use Bridge, Host or AwsVpc instead.');
     }
 
     // Bridge or host network mode requires SRV records
@@ -473,7 +519,7 @@ export abstract class BaseService extends Resource
         dnsRecordType = cloudmap.DnsRecordType.SRV;
       }
       if (dnsRecordType !== cloudmap.DnsRecordType.SRV) {
-        throw new Error("SRV records must be used when network mode is Bridge or Host.");
+        throw new Error('SRV records must be used when network mode is Bridge or Host.');
       }
     }
 
@@ -493,7 +539,8 @@ export abstract class BaseService extends Resource
       namespace: sdNamespace,
       name: options.name,
       dnsRecordType: dnsRecordType!,
-      customHealthCheck: { failureThreshold: options.failureThreshold || 1 }
+      customHealthCheck: { failureThreshold: options.failureThreshold || 1 },
+      dnsTtl: options.dnsTtl,
     });
 
     const serviceArn = cloudmapService.serviceArn;
@@ -502,7 +549,7 @@ export abstract class BaseService extends Resource
     this.addServiceRegistry({
       arn: serviceArn,
       containerName,
-      containerPort
+      containerPort,
     });
 
     this.cloudmapService = cloudmapService;
@@ -518,8 +565,8 @@ export abstract class BaseService extends Resource
       namespace: 'AWS/ECS',
       metricName,
       dimensions: { ClusterName: this.cluster.clusterName, ServiceName: this.serviceName },
-      ...props
-    });
+      ...props,
+    }).attachTo(this);
   }
 
   /**
@@ -542,11 +589,12 @@ export abstract class BaseService extends Resource
 
   /**
    * This method is called to create a networkConfiguration.
+   * @deprecated use configureAwsVpcNetworkingWithSecurityGroups instead.
    */
-  // tslint:disable-next-line:max-line-length
+  // eslint-disable-next-line max-len
   protected configureAwsVpcNetworking(vpc: ec2.IVpc, assignPublicIp?: boolean, vpcSubnets?: ec2.SubnetSelection, securityGroup?: ec2.ISecurityGroup) {
     if (vpcSubnets === undefined) {
-      vpcSubnets = { subnetType: assignPublicIp ? ec2.SubnetType.PUBLIC : ec2.SubnetType.PRIVATE };
+      vpcSubnets = assignPublicIp ? { subnetType: ec2.SubnetType.PUBLIC } : {};
     }
     if (securityGroup === undefined) {
       securityGroup = new ec2.SecurityGroup(this, 'SecurityGroup', { vpc });
@@ -558,7 +606,30 @@ export abstract class BaseService extends Resource
         assignPublicIp: assignPublicIp ? 'ENABLED' : 'DISABLED',
         subnets: vpc.selectSubnets(vpcSubnets).subnetIds,
         securityGroups: Lazy.listValue({ produce: () => [securityGroup!.securityGroupId] }),
-      }
+      },
+    };
+  }
+
+  /**
+   * This method is called to create a networkConfiguration.
+   */
+  // eslint-disable-next-line max-len
+  protected configureAwsVpcNetworkingWithSecurityGroups(vpc: ec2.IVpc, assignPublicIp?: boolean, vpcSubnets?: ec2.SubnetSelection, securityGroups?: ec2.ISecurityGroup[]) {
+    if (vpcSubnets === undefined) {
+      vpcSubnets = assignPublicIp ? { subnetType: ec2.SubnetType.PUBLIC } : {};
+    }
+    if (securityGroups === undefined || securityGroups.length === 0) {
+      securityGroups = [ new ec2.SecurityGroup(this, 'SecurityGroup', { vpc }) ];
+    }
+
+    securityGroups.forEach((sg) => { this.connections.addSecurityGroup(sg); }, this);
+
+    this.networkConfiguration = {
+      awsvpcConfiguration: {
+        assignPublicIp: assignPublicIp ? 'ENABLED' : 'DISABLED',
+        subnets: vpc.selectSubnets(vpcSubnets).subnetIds,
+        securityGroups: securityGroups.map((sg) => sg.securityGroupId),
+      },
     };
   }
 
@@ -575,16 +646,16 @@ export abstract class BaseService extends Resource
    */
   private attachToELB(loadBalancer: elb.LoadBalancer, containerName: string, containerPort: number): void {
     if (this.taskDefinition.networkMode === NetworkMode.AWS_VPC) {
-      throw new Error("Cannot use a Classic Load Balancer if NetworkMode is AwsVpc. Use Host or Bridge instead.");
+      throw new Error('Cannot use a Classic Load Balancer if NetworkMode is AwsVpc. Use Host or Bridge instead.');
     }
     if (this.taskDefinition.networkMode === NetworkMode.NONE) {
-      throw new Error("Cannot use a Classic Load Balancer if NetworkMode is None. Use Host or Bridge instead.");
+      throw new Error('Cannot use a Classic Load Balancer if NetworkMode is None. Use Host or Bridge instead.');
     }
 
     this.loadBalancers.push({
       loadBalancerName: loadBalancer.loadBalancerName,
       containerName,
-      containerPort
+      containerPort,
     });
   }
 
@@ -593,7 +664,7 @@ export abstract class BaseService extends Resource
    */
   private attachToELBv2(targetGroup: elbv2.ITargetGroup, containerName: string, containerPort: number): elbv2.LoadBalancerTargetProps {
     if (this.taskDefinition.networkMode === NetworkMode.NONE) {
-      throw new Error("Cannot use a load balancer if NetworkMode is None. Use Bridge, Host or AwsVpc instead.");
+      throw new Error('Cannot use a load balancer if NetworkMode is None. Use Bridge, Host or AwsVpc instead.');
     }
 
     this.loadBalancers.push({
@@ -612,7 +683,7 @@ export abstract class BaseService extends Resource
 
   private get defaultLoadBalancerTarget() {
     return this.loadBalancerTarget({
-      containerName: this.taskDefinition.defaultContainer!.containerName
+      containerName: this.taskDefinition.defaultContainer!.containerName,
     });
   }
 
@@ -644,8 +715,8 @@ export abstract class BaseService extends Resource
   private evaluateHealthGracePeriod(providedHealthCheckGracePeriod?: Duration): IResolvable {
     return Lazy.anyValue({
       produce: () => providedHealthCheckGracePeriod !== undefined ? providedHealthCheckGracePeriod.toSeconds() :
-                     this.loadBalancers.length > 0 ? 60 :
-                     undefined
+        this.loadBalancers.length > 0 ? 60 :
+          undefined,
     });
   }
 }
@@ -662,9 +733,16 @@ export interface CloudMapOptions {
   readonly name?: string,
 
   /**
+   * The service discovery namespace for the Cloud Map service to attach to the ECS service.
+   *
+   * @default - the defaultCloudMapNamespace associated to the cluster
+   */
+  readonly cloudMapNamespace?: cloudmap.INamespace;
+
+  /**
    * The DNS record type that you want AWS Cloud Map to create. The supported record types are A or SRV.
    *
-   * @default: A
+   * @default DnsRecordType.A
    */
   readonly dnsRecordType?: cloudmap.DnsRecordType.A | cloudmap.DnsRecordType.SRV,
 
@@ -725,6 +803,27 @@ export enum LaunchType {
    * The service will be launched using the FARGATE launch type
    */
   FARGATE = 'FARGATE'
+}
+
+/**
+ * The deployment controller type to use for the service.
+ */
+export enum DeploymentControllerType {
+  /**
+   * The rolling update (ECS) deployment type involves replacing the current
+   * running version of the container with the latest version.
+   */
+  ECS = 'ECS',
+
+  /**
+   * The blue/green (CODE_DEPLOY) deployment type uses the blue/green deployment model powered by AWS CodeDeploy
+   */
+  CODE_DEPLOY = 'CODE_DEPLOY',
+
+  /**
+   * The external (EXTERNAL) deployment type enables you to use any third-party deployment controller
+   */
+  EXTERNAL = 'EXTERNAL'
 }
 
 /**

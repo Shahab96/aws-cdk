@@ -1,8 +1,6 @@
-import cxapi = require('@aws-cdk/cx-api');
-import { CloudAssembly } from '@aws-cdk/cx-api';
-import { Construct, ConstructNode } from './construct';
-import { collectRuntimeInformation } from './private/runtime-info';
+import * as cxapi from '@aws-cdk/cx-api';
 import { TreeMetadata } from './private/tree-metadata';
+import { Stage } from './stage';
 
 const APP_SYMBOL = Symbol.for('@aws-cdk/core.App');
 
@@ -51,7 +49,7 @@ export interface AppProps {
    *
    * @default - no additional context
    */
-  readonly context?: { [key: string]: string };
+  readonly context?: { [key: string]: any };
 
   /**
    * Include construct tree metadata as part of the Cloud Assembly.
@@ -74,10 +72,9 @@ export interface AppProps {
  * CloudFormation templates and assets that are needed to deploy this app into
  * the AWS cloud.
  *
- * @see https://docs.aws.amazon.com/cdk/latest/guide/apps_and_stacks.html
+ * @see https://docs.aws.amazon.com/cdk/latest/guide/apps.html
  */
-export class App extends Construct {
-
+export class App extends Stage {
   /**
    * Checks if an object is an instance of the `App` class.
    * @returns `true` if `obj` is an `App`.
@@ -87,16 +84,14 @@ export class App extends Construct {
     return APP_SYMBOL in obj;
   }
 
-  private _assembly?: CloudAssembly;
-  private readonly runtimeInfo: boolean;
-  private readonly outdir?: string;
-
   /**
    * Initializes a CDK application.
    * @param props initialization properties
    */
   constructor(props: AppProps = {}) {
-    super(undefined as any, '');
+    super(undefined as any, '', {
+      outdir: props.outdir ?? process.env[cxapi.OUTDIR_ENV],
+    });
 
     Object.defineProperty(this, APP_SYMBOL, { value: true });
 
@@ -110,10 +105,6 @@ export class App extends Construct {
       this.node.setContext(cxapi.DISABLE_VERSION_REPORTING, true);
     }
 
-    // both are reverse logic
-    this.runtimeInfo = this.node.tryGetContext(cxapi.DISABLE_VERSION_REPORTING) ? false : true;
-    this.outdir = props.outdir || process.env[cxapi.OUTDIR_ENV];
-
     const autoSynth = props.autoSynth !== undefined ? props.autoSynth : cxapi.OUTDIR_ENV in process.env;
     if (autoSynth) {
       // synth() guarantuees it will only execute once, so a default of 'true'
@@ -124,28 +115,6 @@ export class App extends Construct {
     if (props.treeMetadata === undefined || props.treeMetadata) {
       new TreeMetadata(this);
     }
-  }
-
-  /**
-   * Synthesizes a cloud assembly for this app. Emits it to the directory
-   * specified by `outdir`.
-   *
-   * @returns a `CloudAssembly` which can be used to inspect synthesized
-   * artifacts such as CloudFormation templates and assets.
-   */
-  public synth(): CloudAssembly {
-    // we already have a cloud assembly, no-op for you
-    if (this._assembly) {
-      return this._assembly;
-    }
-
-    const assembly = ConstructNode.synth(this.node, {
-      outdir: this.outdir,
-      runtimeInfo: this.runtimeInfo ? collectRuntimeInformation() : undefined
-    });
-
-    this._assembly = assembly;
-    return assembly;
   }
 
   private loadContext(defaults: { [key: string]: string } = { }) {

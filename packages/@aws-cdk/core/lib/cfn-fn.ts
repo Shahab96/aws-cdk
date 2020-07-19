@@ -6,13 +6,27 @@ import { IResolvable, IResolveContext } from './resolvable';
 import { captureStackTrace } from './stack-trace';
 import { Token } from './token';
 
-// tslint:disable:max-line-length
+/* eslint-disable max-len */
 
 /**
  * CloudFormation intrinsic functions.
  * http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference.html
  */
 export class Fn {
+  /**
+   * The ``Ref`` intrinsic function returns the value of the specified parameter or resource.
+   * Note that it doesn't validate the logicalName, it mainly serves paremeter/resource reference defined in a ``CfnInclude`` template.
+   * @param logicalName The logical name of a parameter/resource for which you want to retrieve its value.
+   */
+  public static ref(logicalName: string): string {
+    return new FnRef(logicalName).toString();
+  }
+
+  /** @internal */
+  public static _ref(logicalId: string): IResolvable {
+    return new FnRef(logicalId);
+  }
+
   /**
    * The ``Fn::GetAtt`` intrinsic function returns the value of an attribute
    * from a resource in the template.
@@ -39,7 +53,7 @@ export class Fn {
    */
   public static join(delimiter: string, listOfValues: string[]): string {
     if (listOfValues.length === 0) {
-      throw new Error(`FnJoin requires at least one value to be provided`);
+      throw new Error('FnJoin requires at least one value to be provided');
     }
 
     return new FnJoin(delimiter, listOfValues).toString();
@@ -156,6 +170,17 @@ export class Fn {
    */
   public static findInMap(mapName: string, topLevelKey: string, secondLevelKey: string): string {
     return new FnFindInMap(mapName, topLevelKey, secondLevelKey).toString();
+  }
+
+  /**
+   * Creates a token representing the ``Fn::Transform`` expression
+   * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-transform.html
+   * @param macroName The name of the macro to perform the processing
+   * @param parameters The parameters to be passed to the macro
+   * @returns a token representing the transform expression
+   */
+  public static transform(macroName: string, parameters: { [name: string]: any }): IResolvable {
+    return new FnTransform(macroName, parameters);
   }
 
   /**
@@ -312,6 +337,21 @@ class FnBase extends Intrinsic {
 }
 
 /**
+ * The intrinsic function ``Ref`` returns the value of the specified parameter or resource.
+ * When you specify a parameter's logical name, it returns the value of the parameter.
+ * When you specify a resource's logical name, it returns a value that you can typically use to refer to that resource, such as a physical ID.
+ */
+class FnRef extends FnBase {
+  /**
+   * Creates an ``Ref`` function.
+   * @param logicalName The logical name of a parameter/resource for which you want to retrieve its value.
+   */
+  constructor(logicalName: string) {
+    super('Ref', logicalName);
+  }
+}
+
+/**
  * The intrinsic function ``Fn::FindInMap`` returns the value corresponding to keys in a two-level
  * map that is declared in the Mappings section.
  */
@@ -324,6 +364,20 @@ class FnFindInMap extends FnBase {
    */
   constructor(mapName: string, topLevelKey: any, secondLevelKey: any) {
     super('Fn::FindInMap', [ mapName, topLevelKey, secondLevelKey ]);
+  }
+}
+
+/**
+ * The intrinsic function ``Fn::Transform`` specifies a macro to perform custom processing on part of a stack template.
+ */
+class FnTransform extends FnBase {
+  /**
+   * creates an ``Fn::Transform`` function.
+   * @param macroName The name of the macro to be invoked
+   * @param parameters the parameters to pass to it
+   */
+  constructor(macroName: string, parameters: { [name: string]: any }) {
+    super('Fn::Transform', { Name: macroName, Parameters: parameters });
   }
 }
 
@@ -647,7 +701,7 @@ class FnJoin implements IResolvable {
    */
   constructor(delimiter: string, listOfValues: any[]) {
     if (listOfValues.length === 0) {
-      throw new Error(`FnJoin requires at least one value to be provided`);
+      throw new Error('FnJoin requires at least one value to be provided');
     }
 
     this.delimiter = delimiter;
@@ -672,7 +726,7 @@ class FnJoin implements IResolvable {
   }
 
   public toJSON() {
-    return `<Fn::Join>`;
+    return '<Fn::Join>';
   }
 
   /**

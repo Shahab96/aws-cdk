@@ -13,9 +13,13 @@
 # if a task fails, it will stop, and then to resume, simply run `foreach.sh` again (with or without the same command).
 #
 # to reset the session (either when all tasks finished or if you wish to run a different session), run:
-#     rm -f ~/.foreach.*
+#     foreach.sh --reset
 #
-# this will effectively delete the state files.
+# to run the command only against the current module and its dependencies:
+#     foreach.sh --up COMMAND
+#
+# to run the command only against the current module and its consumers:
+#     foreach.sh --down COMMAND
 #
 # --------------------------------------------------------------------------------------------------
 set -euo pipefail
@@ -23,7 +27,6 @@ scriptdir=$(cd $(dirname $0) && pwd)
 statedir="${scriptdir}"
 statefile="${statedir}/.foreach.state"
 commandfile="${statedir}/.foreach.command"
-command_arg="${@:-}"
 base=$PWD
 
 function heading {
@@ -44,6 +47,45 @@ if [[ "${1:-}" == "--reset" ]]; then
     exit 0
 fi
 
+if [[ "${1:-}" == "--skip" ]]; then
+    if [ ! -f ${statefile} ]; then
+        error "skip failed. no active sessions found."
+        exit 1
+    fi
+    next=$(head -1 ${statefile})
+    if [ -z "${next}" ]; then
+      error "skip failed. queue is empty. to reset:"
+      error "   $0 --reset"
+      exit 1
+    fi
+    tail -n +2 "${statefile}" > "${statefile}.tmp"
+    cp "${statefile}.tmp" "${statefile}"
+    success "directory '$next' skipped. re-run the original foreach command to resume."
+    exit 0
+fi
+
+direction=""
+direction_desc=""
+if [[ "${1:-}" == "--up" || "${1:-}" == "--down" ]]; then
+    if [ ! -f package.json ]; then
+      echo "--up or --down can only be executed from within a module directory (looking for package.json)"
+      exit 1
+    fi
+
+    scope=$(node -p "require('./package.json').name")
+
+    if [[ "${1:-}" == "--up" ]]; then
+      direction=" --scope ${scope} --include-dependencies"
+      direction_desc="('${scope}' and its dependencies)"
+    else # --down
+      direction=" --scope ${scope} --include-dependents"
+      direction_desc="('${scope}' and its consumers)"
+    fi
+
+    shift
+fi
+
+command_arg="${@:-}"
 
 if [ -f "${statefile}" ] && [ -f "${commandfile}" ]; then
   command="$(cat ${commandfile})"
@@ -57,8 +99,8 @@ fi
 if [ ! -f "${statefile}" ] && [ ! -f "${commandfile}" ]; then
   if [ ! -z "${command_arg}" ]; then
     command="${command_arg}"
-    success "starting new session"
-    node_modules/.bin/lerna ls --all --toposort -p > ${statefile}
+    success "starting new session ${direction_desc}"
+    ${scriptdir}/../node_modules/.bin/lerna ls --all ${direction} --toposort -p > ${statefile}
     echo "${command}" > ${commandfile}
   else
     error "no active session, use \"$(basename $0) COMMAND\" to start a new session"
@@ -81,11 +123,11 @@ heading "${next}: ${command} (${remaining} remaining)"
 (
   cd ${next}
 
-  # special-case "npm run" - skip any modules that simply don't have
+  # special-case "npm run" or "yarn run" - skip any modules that simply don't have
   # that script (similar to how "lerna run" behaves)
-  if [[ "${command}" == "npm run "* ]]; then
+  if [[ "${command}" == "npm run "* ]] || [[ "${command}" == "yarn run "* ]]; then
     script="$(echo ${command} | cut -d" " -f3)"
-    exists=$(node -pe "require('./package.json').scripts['${script}'] || ''")
+    exists=$(node -pe "(require('./package.json').scripts && require('./package.json').scripts['${script}']) || ''")
     if [ -z "${exists}" ]; then
       echo "skipping (no "${script}" script in package.json)"
       exit 0

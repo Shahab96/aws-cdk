@@ -41,10 +41,13 @@ def handler(event, context):
         try:
             source_bucket_names = props['SourceBucketNames']
             source_object_keys  = props['SourceObjectKeys']
-            dest_bucket_name   = props['DestinationBucketName']
-            dest_bucket_prefix = props.get('DestinationBucketKeyPrefix', '')
-            retain_on_delete   = props.get('RetainOnDelete', "true") == "true"
-            distribution_id    = props.get('DistributionId', '')
+            dest_bucket_name    = props['DestinationBucketName']
+            dest_bucket_prefix  = props.get('DestinationBucketKeyPrefix', '')
+            retain_on_delete    = props.get('RetainOnDelete', "true") == "true"
+            distribution_id     = props.get('DistributionId', '')
+            user_metadata       = props.get('UserMetadata', {})
+            system_metadata     = props.get('SystemMetadata', {})
+            prune               = props.get('Prune', 'true').lower() == 'true'
 
             default_distribution_path = dest_bucket_prefix
             if not default_distribution_path.endswith("/"):
@@ -96,7 +99,7 @@ def handler(event, context):
             aws_command("s3", "rm", old_s3_dest, "--recursive")
 
         if request_type == "Update" or request_type == "Create":
-            s3_deploy(s3_source_zips, s3_dest)
+            s3_deploy(s3_source_zips, s3_dest, user_metadata, system_metadata, prune)
 
         if distribution_id:
             cloudfront_invalidate(distribution_id, distribution_paths)
@@ -110,7 +113,7 @@ def handler(event, context):
 
 #---------------------------------------------------------------------------------------------------
 # populate all files from s3_source_zips to a destination bucket
-def s3_deploy(s3_source_zips, s3_dest):
+def s3_deploy(s3_source_zips, s3_dest, user_metadata, system_metadata, prune):
     # create a temporary working directory
     workdir=tempfile.mkdtemp()
     logger.info("| workdir: %s" % workdir)
@@ -129,7 +132,16 @@ def s3_deploy(s3_source_zips, s3_dest):
           zip.extractall(contents_dir)
 
     # sync from "contents" to destination
-    aws_command("s3", "sync", "--delete", contents_dir, s3_dest)
+
+    s3_command = ["s3", "sync"]
+
+    if prune:
+      s3_command.append("--delete")
+
+    s3_command.extend([contents_dir, s3_dest])
+    s3_command.extend(create_metadata_args(user_metadata, system_metadata))
+    aws_command(*s3_command)
+
     shutil.rmtree(workdir)
 
 #---------------------------------------------------------------------------------------------------
@@ -148,6 +160,24 @@ def cloudfront_invalidate(distribution_id, distribution_paths):
     cloudfront.get_waiter('invalidation_completed').wait(
         DistributionId=distribution_id,
         Id=invalidation_resp['Invalidation']['Id'])
+
+#---------------------------------------------------------------------------------------------------
+# set metadata
+def create_metadata_args(raw_user_metadata, raw_system_metadata):
+    if len(raw_user_metadata) == 0 and len(raw_system_metadata) == 0:
+        return []
+
+    format_system_metadata_key = lambda k: k.lower()
+    format_user_metadata_key = lambda k: k.lower() if k.lower().startswith("x-amzn-meta-") else f"x-amzn-meta-{k.lower()}"
+
+    system_metadata = { format_system_metadata_key(k): v for k, v in raw_system_metadata.items() }
+    user_metadata = { format_user_metadata_key(k): v for k, v in raw_user_metadata.items() }
+
+    flatten = lambda l: [item for sublist in l for item in sublist]
+    system_args = flatten([[f"--{k}", v] for k, v in system_metadata.items()])
+    user_args = ["--metadata", json.dumps(user_metadata, separators=(',', ':'))] if len(user_metadata) > 0 else []
+
+    return system_args + user_args + ["--metadata-directive", "REPLACE"]
 
 #---------------------------------------------------------------------------------------------------
 # executes an "aws" cli command

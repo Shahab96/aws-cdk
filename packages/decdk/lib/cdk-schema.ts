@@ -1,8 +1,8 @@
-import colors = require('colors/safe');
-import jsiiReflect = require('jsii-reflect');
+import * as colors from 'colors/safe';
+import * as jsiiReflect from 'jsii-reflect';
 import { SchemaContext, schemaForTypeReference } from '../lib/jsii2schema';
 
-// tslint:disable:no-console
+/* eslint-disable no-console */
 
 export interface RenderSchemaOptions {
   warnings?: boolean;

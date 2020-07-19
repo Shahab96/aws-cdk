@@ -90,14 +90,15 @@ export class NetworkLoadBalancedEc2Service extends NetworkLoadBalancedServiceBas
       const taskImageOptions = props.taskImageOptions;
       this.taskDefinition = new Ec2TaskDefinition(this, 'TaskDef', {
         executionRole: taskImageOptions.executionRole,
-        taskRole: taskImageOptions.taskRole
+        taskRole: taskImageOptions.taskRole,
+        family: taskImageOptions.family,
       });
 
       // Create log driver if logging is enabled
       const enableLogging = taskImageOptions.enableLogging !== undefined ? taskImageOptions.enableLogging : true;
       const logDriver = taskImageOptions.logDriver !== undefined
-                          ? taskImageOptions.logDriver : enableLogging
-                            ? this.createAWSLogDriver(this.node.id) : undefined;
+        ? taskImageOptions.logDriver : enableLogging
+          ? this.createAWSLogDriver(this.node.id) : undefined;
 
       const containerName = taskImageOptions.containerName !== undefined ? taskImageOptions.containerName : 'web';
       const container = this.taskDefinition.addContainer(containerName, {
@@ -110,19 +111,21 @@ export class NetworkLoadBalancedEc2Service extends NetworkLoadBalancedServiceBas
         logging: logDriver,
       });
       container.addPortMappings({
-        containerPort: taskImageOptions.containerPort || 80
+        containerPort: taskImageOptions.containerPort || 80,
       });
     } else {
       throw new Error('You must specify one of: taskDefinition or image');
     }
 
-    this.service = new Ec2Service(this, "Service", {
+    this.service = new Ec2Service(this, 'Service', {
       cluster: this.cluster,
       desiredCount: this.desiredCount,
       taskDefinition: this.taskDefinition,
       assignPublicIp: false,
       serviceName: props.serviceName,
       healthCheckGracePeriod: props.healthCheckGracePeriod,
+      minHealthyPercent: props.minHealthyPercent,
+      maxHealthyPercent: props.maxHealthyPercent,
       propagateTags: props.propagateTags,
       enableECSManagedTags: props.enableECSManagedTags,
       cloudMapOptions: props.cloudMapOptions,

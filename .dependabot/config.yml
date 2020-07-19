@@ -6,10 +6,14 @@ update_configs:
   - directory: /
     package_manager: javascript
     update_schedule: live
+    version_requirement_updates: increase_versions
     ignored_updates:
       - match:
-          # Don't suggest upgrading @types/node to versions >= 9
-          dependency_name: '@types/node'
-          version_requirement: '>= 9'
-    version_requirement_updates: increase_versions
-    default_labels: []
+          dependency_name: "jsii*"
+      - match:
+          dependency_name: "@jsii/*"
+      - match:
+          dependency_name: "codemaker"
+      - match:
+          dependency_name: "@types/node"
+          version_requirement: ">=11.0.0-0"

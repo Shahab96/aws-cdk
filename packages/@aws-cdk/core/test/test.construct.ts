@@ -1,8 +1,9 @@
-import cxapi = require('@aws-cdk/cx-api');
+import * as cxschema from '@aws-cdk/cloud-assembly-schema';
 import { Test } from 'nodeunit';
 import { App as Root, Aws, Construct, ConstructNode, ConstructOrder, IConstruct, Lazy, ValidationError } from '../lib';
+import { reEnableStackTraceCollection, restoreStackTraceColection } from './util';
 
-// tslint:disable:variable-name
+/* eslint-disable @typescript-eslint/naming-convention */
 
 export = {
   'the "Root" construct is a special construct which can be used as the root of the tree'(test: Test) {
@@ -62,7 +63,7 @@ export = {
     test.done();
   },
 
-  "dont allow unresolved tokens to be used in construct IDs"(test: Test) {
+  'dont allow unresolved tokens to be used in construct IDs'(test: Test) {
     // GIVEN
     const root = new Root();
     const token = Lazy.stringValue({ produce: () => 'lazy' });
@@ -121,6 +122,20 @@ export = {
     test.done();
   },
 
+  'can remove children from the tree using tryRemoveChild()'(test: Test) {
+    const root = new Root();
+    const childrenBeforeAdding = root.node.children.length; // Invariant to adding 'Metadata' resource or not
+
+    // Add & remove
+    const child = new Construct(root, 'Construct');
+    test.equals(true, root.node.tryRemoveChild(child.node.id));
+    test.equals(false, root.node.tryRemoveChild(child.node.id)); // Second time does nothing
+
+    test.equals(undefined, root.node.tryFindChild(child.node.id));
+    test.equals(childrenBeforeAdding, root.node.children.length);
+    test.done();
+  },
+
   'construct.toString() and construct.toTreeString() can be used for diagnostics'(test: Test) {
     const t = createTree();
 
@@ -134,7 +149,7 @@ export = {
   'construct.getContext(key) can be used to read a value from context defined at the root level'(test: Test) {
     const context = {
       ctx1: 12,
-      ctx2: 'hello'
+      ctx2: 'hello',
     };
 
     const t = createTree(context);
@@ -143,7 +158,7 @@ export = {
     test.done();
   },
 
-  // tslint:disable-next-line:max-line-length
+  // eslint-disable-next-line max-len
   'construct.setContext(k,v) sets context at some level and construct.getContext(key) will return the lowermost value defined in the stack'(test: Test) {
     const root = new Root();
     const highChild = new Construct(root, 'highChild');
@@ -232,6 +247,7 @@ export = {
   },
 
   'addMetadata(type, data) can be used to attach metadata to constructs FIND_ME'(test: Test) {
+    const previousValue = reEnableStackTraceCollection();
     const root = new Root();
     const con = new Construct(root, 'MyConstruct');
     test.deepEqual(con.node.metadata, [], 'starts empty');
@@ -239,12 +255,13 @@ export = {
     con.node.addMetadata('key', 'value');
     con.node.addMetadata('number', 103);
     con.node.addMetadata('array', [ 123, 456 ]);
+    restoreStackTraceColection(previousValue);
 
     test.deepEqual(con.node.metadata[0].type, 'key');
     test.deepEqual(con.node.metadata[0].data, 'value');
     test.deepEqual(con.node.metadata[1].data, 103);
     test.deepEqual(con.node.metadata[2].data, [ 123, 456 ]);
-    test.ok(con.node.metadata[0].trace && con.node.metadata[0].trace[0].indexOf('FIND_ME') !== -1, 'First stack line should include this function\s name');
+    test.ok(con.node.metadata[0].trace && con.node.metadata[0].trace[1].indexOf('FIND_ME') !== -1, 'First stack line should include this function\s name');
     test.done();
   },
 
@@ -268,30 +285,39 @@ export = {
   },
 
   'addWarning(message) can be used to add a "WARNING" message entry to the construct'(test: Test) {
+    const previousValue = reEnableStackTraceCollection();
     const root = new Root();
     const con = new Construct(root, 'MyConstruct');
     con.node.addWarning('This construct is deprecated, use the other one instead');
-    test.deepEqual(con.node.metadata[0].type, cxapi.WARNING_METADATA_KEY);
+    restoreStackTraceColection(previousValue);
+
+    test.deepEqual(con.node.metadata[0].type, cxschema.ArtifactMetadataEntryType.WARN);
     test.deepEqual(con.node.metadata[0].data, 'This construct is deprecated, use the other one instead');
     test.ok(con.node.metadata[0].trace && con.node.metadata[0].trace.length > 0);
     test.done();
   },
 
   'addError(message) can be used to add a "ERROR" message entry to the construct'(test: Test) {
+    const previousValue = reEnableStackTraceCollection();
     const root = new Root();
     const con = new Construct(root, 'MyConstruct');
     con.node.addError('Stop!');
-    test.deepEqual(con.node.metadata[0].type, cxapi.ERROR_METADATA_KEY);
+    restoreStackTraceColection(previousValue);
+
+    test.deepEqual(con.node.metadata[0].type, cxschema.ArtifactMetadataEntryType.ERROR);
     test.deepEqual(con.node.metadata[0].data, 'Stop!');
     test.ok(con.node.metadata[0].trace && con.node.metadata[0].trace.length > 0);
     test.done();
   },
 
   'addInfo(message) can be used to add an "INFO" message entry to the construct'(test: Test) {
+    const previousValue = reEnableStackTraceCollection();
     const root = new Root();
     const con = new Construct(root, 'MyConstruct');
     con.node.addInfo('Hey there, how do you do?');
-    test.deepEqual(con.node.metadata[0].type, cxapi.INFO_METADATA_KEY);
+    restoreStackTraceColection(previousValue);
+
+    test.deepEqual(con.node.metadata[0].type, cxschema.ArtifactMetadataEntryType.INFO);
     test.deepEqual(con.node.metadata[0].data, 'Hey there, how do you do?');
     test.ok(con.node.metadata[0].trace && con.node.metadata[0].trace.length > 0);
     test.done();
@@ -307,7 +333,7 @@ export = {
     test.done();
   },
 
-  // tslint:disable-next-line:max-line-length
+  // eslint-disable-next-line max-len
   'construct.validate() can be implemented to perform validation, ConstructNode.validate(construct.node) will return all errors from the subtree (DFS)'(test: Test) {
 
     class MyConstruct extends Construct {
@@ -357,7 +383,7 @@ export = {
       { path: 'MyConstruct', message: 'my-error2' },
       { path: 'TheirConstruct/YourConstruct', message: 'your-error1' },
       { path: 'TheirConstruct', message: 'their-error' },
-      { path: '', message: 'stack-error' }
+      { path: '', message: 'stack-error' },
     ]);
 
     test.done();
@@ -367,11 +393,11 @@ export = {
 
     class LockableConstruct extends Construct {
       public lockMe() {
-        (this.node as any)._lock();
+        (this.node._actualNode as any)._lock();
       }
 
       public unlockMe() {
-        (this.node as any)._unlock();
+        (this.node._actualNode as any)._unlock();
       }
     }
 
@@ -429,7 +455,7 @@ export = {
     test.done();
   },
 
-  'defaultChild': {
+  defaultChild: {
     'returns the child with id "Resource"'(test: Test) {
       const root = new Root();
       new Construct(root, 'child1');
@@ -476,8 +502,8 @@ export = {
         /Cannot determine default child for . There is both a child with id "Resource" and id "Default"/);
       test.done();
 
-    }
-  }
+    },
+  },
 };
 
 function createTree(context?: any) {
@@ -495,7 +521,7 @@ function createTree(context?: any) {
   const child2_1 = new Construct(child2, 'Child21');
 
   return {
-    root, child1, child2, child1_1, child1_2, child1_1_1, child2_1
+    root, child1, child2, child1_1, child1_2, child1_1_1, child2_1,
   };
 }
 

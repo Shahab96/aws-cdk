@@ -75,7 +75,9 @@ export class QueueProcessingEc2Service extends QueueProcessingServiceBase {
     super(scope, id, props);
 
     // Create a Task Definition for the container to start
-    this.taskDefinition = new Ec2TaskDefinition(this, 'QueueProcessingTaskDef');
+    this.taskDefinition = new Ec2TaskDefinition(this, 'QueueProcessingTaskDef', {
+      family: props.family,
+    });
     this.taskDefinition.addContainer('QueueProcessingContainer', {
       image: props.image,
       memoryLimitMiB: props.memoryLimitMiB,
@@ -84,7 +86,7 @@ export class QueueProcessingEc2Service extends QueueProcessingServiceBase {
       command: props.command,
       environment: this.environment,
       secrets: this.secrets,
-      logging: this.logDriver
+      logging: this.logDriver,
     });
 
     // Create an ECS service with the previously defined Task Definition and configure
@@ -93,9 +95,13 @@ export class QueueProcessingEc2Service extends QueueProcessingServiceBase {
       cluster: this.cluster,
       desiredCount: this.desiredCount,
       taskDefinition: this.taskDefinition,
+      serviceName: props.serviceName,
+      minHealthyPercent: props.minHealthyPercent,
+      maxHealthyPercent: props.maxHealthyPercent,
       propagateTags: props.propagateTags,
       enableECSManagedTags: props.enableECSManagedTags,
     });
     this.configureAutoscalingForService(this.service);
+    this.grantPermissionsToService(this.service);
   }
 }

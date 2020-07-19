@@ -9,7 +9,7 @@ export abstract class AclCidr {
    */
   public static ipv4(ipv4Cidr: string): AclCidr {
     return new AclCidrImpl({
-      cidrBlock: ipv4Cidr
+      cidrBlock: ipv4Cidr,
     });
   }
 
@@ -25,7 +25,7 @@ export abstract class AclCidr {
    */
   public static ipv6(ipv6Cidr: string): AclCidr {
     return new AclCidrImpl({
-      ipv6CidrBlock: ipv6Cidr
+      ipv6CidrBlock: ipv6Cidr,
     });
   }
 
@@ -77,7 +77,7 @@ export abstract class AclTraffic {
    */
   public static allTraffic(): AclTraffic {
     return new AclTrafficImpl({
-      protocol: -1
+      protocol: -1,
     });
   }
 
@@ -87,7 +87,7 @@ export abstract class AclTraffic {
   public static icmp(props: AclIcmp): AclTraffic {
     return new AclTrafficImpl({
       protocol: 1,
-      icmp: props
+      icmp: props,
     });
   }
 
@@ -99,7 +99,7 @@ export abstract class AclTraffic {
   public static icmpv6(props: AclIcmp): AclTraffic {
     return new AclTrafficImpl({
       protocol: 58,
-      icmp: props
+      icmp: props,
     });
   }
 
@@ -111,8 +111,8 @@ export abstract class AclTraffic {
       protocol: 6,
       portRange: {
         from: port,
-        to: port
-      }
+        to: port,
+      },
     });
   }
 
@@ -125,7 +125,7 @@ export abstract class AclTraffic {
       portRange: {
         from: startPort,
         to: endPort,
-      }
+      },
     });
   }
 
@@ -137,8 +137,8 @@ export abstract class AclTraffic {
       protocol: 17,
       portRange: {
         from: port,
-        to: port
-      }
+        to: port,
+      },
     });
   }
 
@@ -151,7 +151,7 @@ export abstract class AclTraffic {
       portRange: {
         from: startPort,
         to: endPort,
-      }
+      },
     });
   }
 
@@ -176,17 +176,15 @@ class AclTrafficImpl extends AclTraffic {
 export interface AclTrafficConfig {
   /**
    * The Internet Control Message Protocol (ICMP) code and type.
-   * Requirement is conditional: Required if specifying 1 (ICMP) for the protocol parameter.
    *
-   * @default undefined
+   * @default - Required if specifying 1 (ICMP) for the protocol parameter.
    */
   readonly icmp?: AclIcmp;
 
   /**
    * The range of port numbers for the UDP/TCP protocol.
-   * Conditional required if specifying 6 (TCP) or 17 (UDP) for the protocol parameter.
    *
-   * @default undefined
+   * @default - Required if specifying 6 (TCP) or 17 (UDP) for the protocol parameter
    */
   readonly portRange?: AclPortRange;
 

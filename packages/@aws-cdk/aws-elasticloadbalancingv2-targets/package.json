@@ -1,6 +1,6 @@
 {
   "name": "@aws-cdk/aws-elasticloadbalancingv2-targets",
-  "version": "1.12.0",
+  "version": "0.0.0",
   "description": "Integration targets for AWS ElasticLoadBalancingV2",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -11,8 +11,7 @@
         "package": "software.amazon.awscdk.services.elasticloadbalancingv2.targets",
         "maven": {
           "groupId": "software.amazon.awscdk",
-          "artifactId": "elasticloadbalancingv2-targets",
-          "versionSuffix": ".DEVPREVIEW"
+          "artifactId": "elasticloadbalancingv2-targets"
         }
       },
       "dotnet": {
@@ -20,7 +19,6 @@
         "packageId": "Amazon.CDK.AWS.ElasticLoadBalancingV2.Targets",
         "signAssembly": true,
         "assemblyOriginatorKeyFile": "../../key.snk",
-        "versionSuffix": "-devpreview",
         "iconUrl": "https://raw.githubusercontent.com/aws/aws-cdk/master/logo/default-256-dark.png"
       },
       "python": {
@@ -43,27 +41,16 @@
     "pkglint": "pkglint -f",
     "package": "cdk-package",
     "awslint": "cdk-awslint",
-    "cfn2ts": "cfn2ts",
     "build+test+package": "npm run build+test && npm run package",
-    "build+test": "npm run build && npm test"
-  },
-  "jest": {
-    "moduleFileExtensions": [
-      "js"
-    ],
-    "coverageThreshold": {
-      "global": {
-        "branches": 65,
-        "statements": 80
-      }
-    }
+    "build+test": "npm run build && npm test",
+    "compat": "cdk-compat"
   },
   "keywords": [
     "aws",
     "cdk",
-    "cloudlib",
-    "aws-cloudlib",
-    "aws-clib"
+    "constructs",
+    "elasticloadbalancing",
+    "elb"
   ],
   "author": {
     "name": "Amazon Web Services",
@@ -72,30 +59,44 @@
   },
   "license": "Apache-2.0",
   "devDependencies": {
-    "@aws-cdk/assert": "^1.12.0",
-    "@aws-cdk/aws-ec2": "^1.12.0",
-    "cdk-build-tools": "file:../../../tools/cdk-build-tools",
-    "cdk-integ-tools": "file:../../../tools/cdk-integ-tools",
-    "jest": "^24.9.0",
-    "pkglint": "file:../../../tools/pkglint"
+    "@aws-cdk/assert": "0.0.0",
+    "cdk-build-tools": "0.0.0",
+    "cdk-integ-tools": "0.0.0",
+    "jest": "^25.5.4",
+    "pkglint": "0.0.0"
   },
   "dependencies": {
-    "@aws-cdk/assets": "^1.12.0",
-    "@aws-cdk/aws-elasticloadbalancingv2": "^1.12.0",
-    "@aws-cdk/aws-iam": "^1.12.0",
-    "@aws-cdk/aws-lambda": "^1.12.0",
-    "@aws-cdk/core": "^1.12.0"
+    "@aws-cdk/aws-ec2": "0.0.0",
+    "@aws-cdk/aws-elasticloadbalancingv2": "0.0.0",
+    "@aws-cdk/aws-iam": "0.0.0",
+    "@aws-cdk/aws-lambda": "0.0.0",
+    "@aws-cdk/core": "0.0.0",
+    "constructs": "^3.0.2"
   },
   "homepage": "https://github.com/aws/aws-cdk",
   "peerDependencies": {
-    "@aws-cdk/assets": "^1.12.0",
-    "@aws-cdk/aws-elasticloadbalancingv2": "^1.12.0",
-    "@aws-cdk/aws-iam": "^1.12.0",
-    "@aws-cdk/aws-lambda": "^1.12.0",
-    "@aws-cdk/core": "^1.12.0"
+    "@aws-cdk/aws-ec2": "0.0.0",
+    "@aws-cdk/aws-elasticloadbalancingv2": "0.0.0",
+    "@aws-cdk/aws-iam": "0.0.0",
+    "@aws-cdk/aws-lambda": "0.0.0",
+    "@aws-cdk/core": "0.0.0",
+    "constructs": "^3.0.2"
   },
   "engines": {
-    "node": ">= 10.3.0"
+    "node": ">= 10.13.0 <13 || >=13.7.0"
   },
-  "stability": "experimental"
+  "stability": "experimental",
+  "maturity": "experimental",
+  "awslint": {
+    "exclude": [
+      "docs-public-apis:@aws-cdk/aws-elasticloadbalancingv2-targets.InstanceTarget",
+      "docs-public-apis:@aws-cdk/aws-elasticloadbalancingv2-targets.LambdaTarget"
+    ]
+  },
+  "awscdkio": {
+    "announce": false
+  },
+  "cdk-build": {
+    "jest": true
+  }
 }

@@ -1,12 +1,12 @@
-import events = require('@aws-cdk/aws-events');
-import iam = require('@aws-cdk/aws-iam');
-import kms = require('@aws-cdk/aws-kms');
+import * as events from '@aws-cdk/aws-events';
+import * as iam from '@aws-cdk/aws-iam';
+import * as kms from '@aws-cdk/aws-kms';
 import { Construct, Fn, IResource, Lazy, RemovalPolicy, Resource, Stack, Token } from '@aws-cdk/core';
 import { EOL } from 'os';
 import { BucketPolicy } from './bucket-policy';
 import { IBucketNotificationDestination } from './destination';
 import { BucketNotifications } from './notifications-resource';
-import perms = require('./perms');
+import * as perms from './perms';
 import { LifecycleRule } from './rule';
 import { CfnBucket } from './s3.generated';
 import { parseBucketArn, parseBucketName } from './util';
@@ -55,12 +55,17 @@ export interface IBucket extends IResource {
   readonly bucketRegionalDomainName: string;
 
   /**
+   * If this bucket has been configured for static website hosting.
+   */
+  readonly isWebsite?: boolean;
+
+  /**
    * Optional KMS encryption key associated with this bucket.
    */
   readonly encryptionKey?: kms.IKey;
 
   /**
-   * The resource policy assoicated with this bucket.
+   * The resource policy associated with this bucket.
    *
    * If `autoCreatePolicy` is true, a `BucketPolicy` will be created upon the
    * first call to addToResourcePolicy(s).
@@ -73,7 +78,7 @@ export interface IBucket extends IResource {
    * contents. Use `bucketArn` and `arnForObjects(keys)` to obtain ARNs for
    * this bucket or objects.
    */
-  addToResourcePolicy(permission: iam.PolicyStatement): void;
+  addToResourcePolicy(permission: iam.PolicyStatement): iam.AddToResourcePolicyResult;
 
   /**
    * The https URL of an S3 object. For example:
@@ -85,6 +90,16 @@ export interface IBucket extends IResource {
    * @returns an ObjectS3Url token
    */
   urlForObject(key?: string): string;
+
+  /**
+   * The S3 URL of an S3 object. For example:
+   * @example s3://onlybucket
+   * @example s3://bucket/key
+   * @param key The S3 key of the object. If not specified, the S3 URL of the
+   *      bucket is returned.
+   * @returns an ObjectS3Url token
+   */
+  s3UrlForObject(key?: string): string;
 
   /**
    * Returns an ARN that represents all objects within the bucket that match
@@ -172,7 +187,7 @@ export interface IBucket extends IResource {
   grantPublicAccess(keyPrefix?: string, ...allowedActions: string[]): iam.Grant;
 
   /**
-   * Define a CloudWatch event that triggers when something happens to this repository
+   * Defines a CloudWatch event that triggers when something happens to this bucket
    *
    * Requires that there exists at least one CloudTrail Trail in your account
    * that captures the event. This method will not create the Trail.
@@ -183,8 +198,12 @@ export interface IBucket extends IResource {
   onCloudTrailEvent(id: string, options?: OnCloudTrailBucketEventOptions): events.Rule;
 
   /**
-   * Defines an AWS CloudWatch event rule that can trigger a target when an image is pushed to this
-   * repository.
+   * Defines an AWS CloudWatch event that triggers when an object is uploaded
+   * to the specified paths (keys) in this bucket using the PutObject API call.
+   *
+   * Note that some tools like `aws s3 cp` will automatically use either
+   * PutObject or the multipart upload API depending on the file size,
+   * so using `onCloudTrailWriteObject` may be preferable.
    *
    * Requires that there exists at least one CloudTrail Trail in your account
    * that captures the event. This method will not create the Trail.
@@ -193,6 +212,23 @@ export interface IBucket extends IResource {
    * @param options Options for adding the rule
    */
   onCloudTrailPutObject(id: string, options?: OnCloudTrailBucketEventOptions): events.Rule;
+
+  /**
+   * Defines an AWS CloudWatch event that triggers when an object at the
+   * specified paths (keys) in this bucket are written to.  This includes
+   * the events PutObject, CopyObject, and CompleteMultipartUpload.
+   *
+   * Note that some tools like `aws s3 cp` will automatically use either
+   * PutObject or the multipart upload API depending on the file size,
+   * so using this method may be preferable to `onCloudTrailPutObject`.
+   *
+   * Requires that there exists at least one CloudTrail Trail in your account
+   * that captures the event. This method will not create the Trail.
+   *
+   * @param id The id of the rule
+   * @param options Options for adding the rule
+   */
+  onCloudTrailWriteObject(id: string, options?: OnCloudTrailBucketEventOptions): events.Rule;
 }
 
 /**
@@ -248,6 +284,13 @@ export interface BucketAttributes {
   readonly bucketWebsiteNewUrlFormat?: boolean;
 
   readonly encryptionKey?: kms.IKey;
+
+  /**
+   * If this bucket has been configured for static website hosting.
+   *
+   * @default false
+   */
+  readonly isWebsite?: boolean;
 }
 
 /**
@@ -282,7 +325,12 @@ abstract class BucketBase extends Resource implements IBucket {
   public abstract readonly encryptionKey?: kms.IKey;
 
   /**
-   * The resource policy assoicated with this bucket.
+   * If this bucket has been configured for static website hosting.
+   */
+  public abstract readonly isWebsite?: boolean;
+
+  /**
+   * The resource policy associated with this bucket.
    *
    * If `autoCreatePolicy` is true, a `BucketPolicy` will be created upon the
    * first call to addToResourcePolicy(s).
@@ -319,14 +367,18 @@ abstract class BucketBase extends Resource implements IBucket {
         resources: {
           ARN: options.paths ? options.paths.map(p => this.arnForObjects(p)) : [this.bucketArn],
         },
-      }
+      },
     });
     return rule;
   }
 
   /**
-   * Defines an AWS CloudWatch event rule that can trigger a target when an image is pushed to this
-   * repository.
+   * Defines an AWS CloudWatch event that triggers when an object is uploaded
+   * to the specified paths (keys) in this bucket using the PutObject API call.
+   *
+   * Note that some tools like `aws s3 cp` will automatically use either
+   * PutObject or the multipart upload API depending on the file size,
+   * so using `onCloudTrailWriteObject` may be preferable.
    *
    * Requires that there exists at least one CloudTrail Trail in your account
    * that captures the event. This method will not create the Trail.
@@ -345,19 +397,55 @@ abstract class BucketBase extends Resource implements IBucket {
   }
 
   /**
+   * Defines an AWS CloudWatch event that triggers when an object at the
+   * specified paths (keys) in this bucket are written to.  This includes
+   * the events PutObject, CopyObject, and CompleteMultipartUpload.
+   *
+   * Note that some tools like `aws s3 cp` will automatically use either
+   * PutObject or the multipart upload API depending on the file size,
+   * so using this method may be preferable to `onCloudTrailPutObject`.
+   *
+   * Requires that there exists at least one CloudTrail Trail in your account
+   * that captures the event. This method will not create the Trail.
+   *
+   * @param id The id of the rule
+   * @param options Options for adding the rule
+   */
+  public onCloudTrailWriteObject(id: string, options: OnCloudTrailBucketEventOptions = {}): events.Rule {
+    const rule = this.onCloudTrailEvent(id, options);
+    rule.addEventPattern({
+      detail: {
+        eventName: [
+          'CompleteMultipartUpload',
+          'CopyObject',
+          'PutObject',
+        ],
+        requestParameters: {
+          bucketName: [ this.bucketName ],
+          key: options.paths,
+        },
+      },
+    });
+    return rule;
+  }
+
+  /**
    * Adds a statement to the resource policy for a principal (i.e.
    * account/role/service) to perform actions on this bucket and/or it's
    * contents. Use `bucketArn` and `arnForObjects(keys)` to obtain ARNs for
    * this bucket or objects.
    */
-  public addToResourcePolicy(permission: iam.PolicyStatement) {
+  public addToResourcePolicy(permission: iam.PolicyStatement): iam.AddToResourcePolicyResult {
     if (!this.policy && this.autoCreatePolicy) {
       this.policy = new BucketPolicy(this, 'Policy', { bucket: this });
     }
 
     if (this.policy) {
       this.policy.document.addStatements(permission);
+      return { statementAdded: true, policyDependable: this.policy };
     }
+
+    return { statementAdded: false };
   }
 
   /**
@@ -371,17 +459,20 @@ abstract class BucketBase extends Resource implements IBucket {
    */
   public urlForObject(key?: string): string {
     const stack = Stack.of(this);
-    const components = [ `https://s3.${stack.region}.${stack.urlSuffix}/${this.bucketName}` ];
-    if (key) {
-      // trim prepending '/'
-      if (typeof key === 'string' && key.startsWith('/')) {
-        key = key.substr(1);
-      }
-      components.push('/');
-      components.push(key);
-    }
+    const prefix = `https://s3.${stack.region}.${stack.urlSuffix}/`;
+    return this.buildUrl(prefix, key);
+  }
 
-    return components.join('');
+  /**
+   * The S3 URL of an S3 object. For example:
+   * @example s3://onlybucket
+   * @example s3://bucket/key
+   * @param key The S3 key of the object. If not specified, the S3 URL of the
+   *      bucket is returned.
+   * @returns an ObjectS3Url token
+   */
+  public s3UrlForObject(key?: string): string {
+    return this.buildUrl('s3://', key);
   }
 
   /**
@@ -511,10 +602,29 @@ abstract class BucketBase extends Resource implements IBucket {
     });
   }
 
-  private grant(grantee: iam.IGrantable,
-                bucketActions: string[],
-                keyActions: string[],
-                resourceArn: string, ...otherResourceArns: string[]) {
+  private buildUrl(prefix: string, key?: string): string {
+    const components = [
+      prefix,
+      this.bucketName,
+    ];
+
+    if (key) {
+      // trim prepending '/'
+      if (typeof key === 'string' && key.startsWith('/')) {
+        key = key.substr(1);
+      }
+      components.push('/');
+      components.push(key);
+    }
+
+    return components.join('');
+  }
+
+  private grant(
+    grantee: iam.IGrantable,
+    bucketActions: string[],
+    keyActions: string[],
+    resourceArn: string, ...otherResourceArns: string[]) {
     const resources = [ resourceArn, ...otherResourceArns ];
 
     const crossAccountAccess = this.isGranteeFromAnotherAccount(grantee);
@@ -537,7 +647,7 @@ abstract class BucketBase extends Resource implements IBucket {
       });
     }
 
-    if (this.encryptionKey) {
+    if (this.encryptionKey && keyActions && keyActions.length !== 0) {
       this.encryptionKey.grant(grantee, ...keyActions);
     }
 
@@ -589,12 +699,12 @@ export class BlockPublicAccess {
     blockPublicAcls: true,
     blockPublicPolicy: true,
     ignorePublicAcls: true,
-    restrictPublicBuckets: true
+    restrictPublicBuckets: true,
   });
 
   public static readonly BLOCK_ACLS = new BlockPublicAccess({
     blockPublicAcls: true,
-    ignorePublicAcls: true
+    ignorePublicAcls: true,
   });
 
   public blockPublicAcls: boolean | undefined;
@@ -636,23 +746,23 @@ export enum HttpMethods {
   /**
    * The GET method requests a representation of the specified resource.
    */
-  GET = "GET",
+  GET = 'GET',
   /**
    * The PUT method replaces all current representations of the target resource with the request payload.
    */
-  PUT = "PUT",
+  PUT = 'PUT',
   /**
    * The HEAD method asks for a response identical to that of a GET request, but without the response body.
    */
-  HEAD = "HEAD",
+  HEAD = 'HEAD',
   /**
    * The POST method is used to submit an entity to the specified resource, often causing a change in state or side effects on the server.
    */
-  POST = "POST",
+  POST = 'POST',
   /**
    * The DELETE method deletes the specified resource.
    */
-  DELETE = "DELETE",
+  DELETE = 'DELETE',
 }
 
 /**
@@ -843,6 +953,19 @@ export interface BucketProps {
    * @default - No CORS configuration.
    */
   readonly cors?: CorsRule[];
+
+  /**
+   * Destination bucket for the server access logs.
+   * @default - If "serverAccessLogsPrefix" undefined - access logs disabled, otherwise - log to current bucket.
+   */
+  readonly serverAccessLogsBucket?: IBucket;
+
+  /**
+   * Optional log file prefix to use for the bucket's access logs.
+   * If defined without "serverAccessLogsBucket", enables access logs to current bucket with this prefix.
+   * @default - No log file prefix
+   */
+  readonly serverAccessLogsPrefix?: string;
 }
 
 /**
@@ -897,6 +1020,7 @@ export class Bucket extends BucketBase {
       public readonly bucketDualStackDomainName = attrs.bucketDualStackDomainName || `${bucketName}.s3.dualstack.${region}.${urlSuffix}`;
       public readonly bucketWebsiteNewUrlFormat = newUrlFormat;
       public readonly encryptionKey = attrs.encryptionKey;
+      public readonly isWebsite = attrs.isWebsite ?? false;
       public policy?: BucketPolicy = undefined;
       protected autoCreatePolicy = false;
       protected disallowPublicAccess = false;
@@ -921,9 +1045,11 @@ export class Bucket extends BucketBase {
   public readonly bucketRegionalDomainName: string;
 
   public readonly encryptionKey?: kms.IKey;
+  public readonly isWebsite?: boolean;
   public policy?: BucketPolicy;
   protected autoCreatePolicy = true;
   protected disallowPublicAccess?: boolean;
+  private accessControl?: BucketAccessControl;
   private readonly lifecycleRules: LifecycleRule[] = [];
   private readonly versioned?: boolean;
   private readonly notifications: BucketNotifications;
@@ -939,16 +1065,20 @@ export class Bucket extends BucketBase {
 
     this.validateBucketName(this.physicalName);
 
+    const websiteConfiguration = this.renderWebsiteConfiguration(props);
+    this.isWebsite = (websiteConfiguration !== undefined);
+
     const resource = new CfnBucket(this, 'Resource', {
       bucketName: this.physicalName,
       bucketEncryption,
       versioningConfiguration: props.versioned ? { status: 'Enabled' } : undefined,
       lifecycleConfiguration: Lazy.anyValue({ produce: () => this.parseLifecycleConfiguration() }),
-      websiteConfiguration: this.renderWebsiteConfiguration(props),
+      websiteConfiguration,
       publicAccessBlockConfiguration: props.blockPublicAccess,
       metricsConfigurations: Lazy.anyValue({ produce: () => this.parseMetricConfiguration() }),
       corsConfiguration: Lazy.anyValue({ produce: () => this.parseCorsConfiguration() }),
-      accessControl: props.accessControl,
+      accessControl: Lazy.stringValue({ produce: () => this.accessControl }),
+      loggingConfiguration: this.parseServerAccessLogs(props),
     });
 
     resource.applyRemovalPolicy(props.removalPolicy);
@@ -971,6 +1101,11 @@ export class Bucket extends BucketBase {
     this.bucketRegionalDomainName = resource.attrRegionalDomainName;
 
     this.disallowPublicAccess = props.blockPublicAccess && props.blockPublicAccess.blockPublicPolicy;
+    this.accessControl = props.accessControl;
+
+    if (props.serverAccessLogsBucket instanceof Bucket) {
+      props.serverAccessLogsBucket.allowLogDelivery();
+    }
 
     // Add all bucket metric configurations rules
     (props.metrics || []).forEach(this.addMetric.bind(this));
@@ -1136,7 +1271,7 @@ export class Bucket extends BucketBase {
 
     if (encryptionType === BucketEncryption.KMS) {
       const encryptionKey = props.encryptionKey || new kms.Key(this, 'Key', {
-        description: `Created by ${this.node.path}`
+        description: `Created by ${this.node.path}`,
       });
 
       const bucketEncryption = {
@@ -1144,10 +1279,10 @@ export class Bucket extends BucketBase {
           {
             serverSideEncryptionByDefault: {
               sseAlgorithm: 'aws:kms',
-              kmsMasterKeyId: encryptionKey.keyArn
-            }
-          }
-        ]
+              kmsMasterKeyId: encryptionKey.keyArn,
+            },
+          },
+        ],
       };
       return { encryptionKey, bucketEncryption };
     }
@@ -1155,8 +1290,8 @@ export class Bucket extends BucketBase {
     if (encryptionType === BucketEncryption.S3_MANAGED) {
       const bucketEncryption = {
         serverSideEncryptionConfiguration: [
-          { serverSideEncryptionByDefault: { sseAlgorithm: 'AES256' } }
-        ]
+          { serverSideEncryptionByDefault: { sseAlgorithm: 'AES256' } },
+        ],
       };
 
       return { bucketEncryption };
@@ -1165,8 +1300,8 @@ export class Bucket extends BucketBase {
     if (encryptionType === BucketEncryption.KMS_MANAGED) {
       const bucketEncryption = {
         serverSideEncryptionConfiguration: [
-          { serverSideEncryptionByDefault: { sseAlgorithm: 'aws:kms' } }
-        ]
+          { serverSideEncryptionByDefault: { sseAlgorithm: 'aws:kms' } },
+        ],
       };
       return { bucketEncryption };
     }
@@ -1191,7 +1326,7 @@ export class Bucket extends BucketBase {
       const enabled = rule.enabled !== undefined ? rule.enabled : true;
 
       const x: CfnBucket.RuleProperty = {
-        // tslint:disable-next-line:max-line-length
+        // eslint-disable-next-line max-len
         abortIncompleteMultipartUpload: rule.abortIncompleteMultipartUploadAfter !== undefined ? { daysAfterInitiation: rule.abortIncompleteMultipartUploadAfter.toDays() } : undefined,
         expirationDate: rule.expirationDate,
         expirationInDays: rule.expiration && rule.expiration.toDays(),
@@ -1199,20 +1334,31 @@ export class Bucket extends BucketBase {
         noncurrentVersionExpirationInDays: rule.noncurrentVersionExpiration && rule.noncurrentVersionExpiration.toDays(),
         noncurrentVersionTransitions: mapOrUndefined(rule.noncurrentVersionTransitions, t => ({
           storageClass: t.storageClass.value,
-          transitionInDays: t.transitionAfter.toDays()
+          transitionInDays: t.transitionAfter.toDays(),
         })),
         prefix: rule.prefix,
         status: enabled ? 'Enabled' : 'Disabled',
         transitions: mapOrUndefined(rule.transitions, t => ({
           storageClass: t.storageClass.value,
           transitionDate: t.transitionDate,
-          transitionInDays: t.transitionAfter && t.transitionAfter.toDays()
+          transitionInDays: t.transitionAfter && t.transitionAfter.toDays(),
         })),
-        tagFilters: self.parseTagFilters(rule.tagFilters)
+        tagFilters: self.parseTagFilters(rule.tagFilters),
       };
 
       return x;
     }
+  }
+
+  private parseServerAccessLogs(props: BucketProps): CfnBucket.LoggingConfigurationProperty | undefined {
+    if (!props.serverAccessLogsBucket && !props.serverAccessLogsPrefix) {
+      return undefined;
+    }
+
+    return {
+      destinationBucketName: props.serverAccessLogsBucket?.bucketName,
+      logFilePrefix: props.serverAccessLogsPrefix,
+    };
   }
 
   private parseMetricConfiguration(): CfnBucket.MetricsConfigurationProperty[] | undefined {
@@ -1228,7 +1374,7 @@ export class Bucket extends BucketBase {
       return {
         id: metric.id,
         prefix: metric.prefix,
-        tagFilters: self.parseTagFilters(metric.tagFilters)
+        tagFilters: self.parseTagFilters(metric.tagFilters),
       };
     }
   }
@@ -1247,7 +1393,7 @@ export class Bucket extends BucketBase {
         allowedHeaders: rule.allowedHeaders,
         allowedMethods: rule.allowedMethods,
         allowedOrigins: rule.allowedOrigins,
-        exposedHeaders: rule.exposedHeaders
+        exposedHeaders: rule.exposedHeaders,
       };
     }
   }
@@ -1259,7 +1405,7 @@ export class Bucket extends BucketBase {
 
     return Object.keys(tagFilters).map(tag => ({
       key: tag,
-      value: tagFilters[tag]
+      value: tagFilters[tag],
     }));
   }
 
@@ -1269,11 +1415,11 @@ export class Bucket extends BucketBase {
     }
 
     if (props.websiteErrorDocument && !props.websiteIndexDocument) {
-      throw new Error(`"websiteIndexDocument" is required if "websiteErrorDocument" is set`);
+      throw new Error('"websiteIndexDocument" is required if "websiteErrorDocument" is set');
     }
 
     if (props.websiteRedirect && (props.websiteErrorDocument || props.websiteIndexDocument || props.websiteRoutingRules)) {
-        throw new Error('"websiteIndexDocument", "websiteErrorDocument" and, "websiteRoutingRules" cannot be set if "websiteRedirect" is used');
+      throw new Error('"websiteIndexDocument", "websiteErrorDocument" and, "websiteRoutingRules" cannot be set if "websiteRedirect" is used');
     }
 
     const routingRules =  props.websiteRoutingRules ? props.websiteRoutingRules.map<CfnBucket.RoutingRuleProperty>((rule) => {
@@ -1284,12 +1430,12 @@ export class Bucket extends BucketBase {
       return {
         redirectRule: {
           hostName: rule.hostName,
-            httpRedirectCode: rule.httpRedirectCode,
-            protocol: rule.protocol,
-            replaceKeyWith: rule.replaceKey && rule.replaceKey.withKey,
-            replaceKeyPrefixWith: rule.replaceKey && rule.replaceKey.prefixWithKey,
+          httpRedirectCode: rule.httpRedirectCode,
+          protocol: rule.protocol,
+          replaceKeyWith: rule.replaceKey && rule.replaceKey.withKey,
+          replaceKeyPrefixWith: rule.replaceKey && rule.replaceKey.prefixWithKey,
         },
-        routingRuleCondition: rule.condition
+        routingRuleCondition: rule.condition,
       };
     }) : undefined;
 
@@ -1297,8 +1443,22 @@ export class Bucket extends BucketBase {
       indexDocument: props.websiteIndexDocument,
       errorDocument: props.websiteErrorDocument,
       redirectAllRequestsTo: props.websiteRedirect,
-      routingRules
+      routingRules,
     };
+  }
+
+  /**
+   * Allows the LogDelivery group to write, fails if ACL was set differently.
+   *
+   * @see
+   * https://docs.aws.amazon.com/AmazonS3/latest/dev/acl-overview.html#canned-acl
+   */
+  private allowLogDelivery() {
+    if (this.accessControl && this.accessControl !== BucketAccessControl.LOG_DELIVERY_WRITE) {
+      throw new Error("Cannot enable log delivery to this bucket because the bucket's ACL has been set and can't be changed");
+    }
+
+    this.accessControl = BucketAccessControl.LOG_DELIVERY_WRITE;
   }
 }
 

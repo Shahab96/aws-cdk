@@ -1,30 +1,15 @@
-import lambda = require('@aws-cdk/aws-lambda');
-import s3 = require('@aws-cdk/aws-s3');
-import cdk = require('@aws-cdk/core');
+import * as certificatemanager from '@aws-cdk/aws-certificatemanager';
+import * as iam from '@aws-cdk/aws-iam';
+import * as lambda from '@aws-cdk/aws-lambda';
+import * as s3 from '@aws-cdk/aws-s3';
+import * as cdk from '@aws-cdk/core';
 import { CfnDistribution } from './cloudfront.generated';
-import { IDistribution } from './distribution';
+import { IDistribution, OriginProtocolPolicy, PriceClass, ViewerProtocolPolicy } from './distribution';
+import { IOriginAccessIdentity } from './origin_access_identity';
 
 export enum HttpVersion {
-  HTTP1_1 = "http1.1",
-  HTTP2 = "http2"
-}
-
-/**
- * The price class determines how many edge locations CloudFront will use for your distribution.
- */
-export enum PriceClass {
-  PRICE_CLASS_100 = "PriceClass_100",
-  PRICE_CLASS_200 = "PriceClass_200",
-  PRICE_CLASS_ALL = "PriceClass_All"
-}
-
-/**
- * How HTTPs should be handled with your distribution.
- */
-export enum ViewerProtocolPolicy {
-  HTTPS_ONLY = "https-only",
-  REDIRECT_TO_HTTPS = "redirect-to-https",
-  ALLOW_ALL = "allow-all"
+  HTTP1_1 = 'http1.1',
+  HTTP2 = 'http2'
 }
 
 /**
@@ -86,8 +71,8 @@ export interface AliasConfiguration {
  *
  */
 export enum SSLMethod {
-  SNI = "sni-only",
-  VIP = "vip"
+  SNI = 'sni-only',
+  VIP = 'vip'
 }
 
 /**
@@ -95,11 +80,11 @@ export enum SSLMethod {
  * CloudFront serves your objects only to browsers or devices that support at least the SSL version that you specify.
  */
 export enum SecurityPolicyProtocol {
-  SSL_V3 = "SSLv3",
-  TLS_V1 = "TLSv1",
-  TLS_V1_2016 = "TLSv1_2016",
-  TLS_V1_1_2016 = "TLSv1.1_2016",
-  TLS_V1_2_2018 = "TLSv1.2_2018"
+  SSL_V3 = 'SSLv3',
+  TLS_V1 = 'TLSv1',
+  TLS_V1_2016 = 'TLSv1_2016',
+  TLS_V1_1_2016 = 'TLSv1.1_2016',
+  TLS_V1_2_2018 = 'TLSv1.2_2018'
 }
 
 /**
@@ -138,14 +123,30 @@ export interface LoggingConfiguration {
  */
 export interface SourceConfiguration {
   /**
+   * The number of times that CloudFront attempts to connect to the origin.
+   * You can specify 1, 2, or 3 as the number of attempts.
+   *
+   * @default 3
+   */
+  readonly connectionAttempts?: number;
+
+  /**
+   * The number of seconds that CloudFront waits when trying to establish a connection to the origin.
+   * You can specify a number of seconds between 1 and 10 (inclusive).
+   *
+   * @default cdk.Duration.seconds(10)
+   */
+  readonly connectionTimeout?: cdk.Duration;
+
+  /**
    * An s3 origin source - if you're using s3 for your assets
    */
-  readonly s3OriginSource?: S3OriginConfig
+  readonly s3OriginSource?: S3OriginConfig;
 
   /**
    * A custom origin source - for all non-s3 sources.
    */
-  readonly customOriginSource?: CustomOriginConfig,
+  readonly customOriginSource?: CustomOriginConfig;
 
   /**
    * The behaviors associated with this source.
@@ -158,7 +159,7 @@ export interface SourceConfiguration {
    *
    * @default /
    */
-  readonly originPath?: string,
+  readonly originPath?: string;
 
   /**
    * Any additional headers to pass to the origin
@@ -222,18 +223,15 @@ export interface CustomOriginConfig {
 }
 
 export enum OriginSslPolicy {
-  SSL_V3 = "SSLv3",
-  TLS_V1 = "TLSv1",
-  TLS_V1_1 = "TLSv1.1",
-  TLS_V1_2 = "TLSv1.2",
+  SSL_V3 = 'SSLv3',
+  TLS_V1 = 'TLSv1',
+  TLS_V1_1 = 'TLSv1.1',
+  TLS_V1_2 = 'TLSv1.2',
 }
 
-export enum OriginProtocolPolicy {
-  HTTP_ONLY = "http-only",
-  MATCH_VIEWER = "match-viewer",
-  HTTPS_ONLY = "https-only",
-}
-
+/**
+ * S3 origin configuration for CloudFront
+ */
 export interface S3OriginConfig {
   /**
    * The source bucket to serve content from
@@ -241,26 +239,28 @@ export interface S3OriginConfig {
   readonly s3BucketSource: s3.IBucket;
 
   /**
-   * The optional ID of the origin identity cloudfront will use when calling your s3 bucket.
+   * The optional Origin Access Identity of the origin identity cloudfront will use when calling your s3 bucket.
+   *
+   * @default No Origin Access Identity which requires the S3 bucket to be public accessible
    */
-  readonly originAccessIdentityId?: string;
+  readonly originAccessIdentity?: IOriginAccessIdentity;
 }
 
 /**
  * An enum for the supported methods to a CloudFront distribution.
  */
 export enum CloudFrontAllowedMethods {
-  GET_HEAD = "GH",
-  GET_HEAD_OPTIONS = "GHO",
-  ALL = "ALL"
+  GET_HEAD = 'GH',
+  GET_HEAD_OPTIONS = 'GHO',
+  ALL = 'ALL'
 }
 
 /**
  * Enums for the methods CloudFront can cache.
  */
 export enum CloudFrontAllowedCachedMethods {
-  GET_HEAD = "GH",
-  GET_HEAD_OPTIONS = "GHO",
+  GET_HEAD = 'GH',
+  GET_HEAD_OPTIONS = 'GHO',
 }
 
 /**
@@ -373,20 +373,158 @@ export enum LambdaEdgeEventType {
    * The origin-request specifies the request to the
    * origin location (e.g. S3)
    */
-  ORIGIN_REQUEST = "origin-request",
+  ORIGIN_REQUEST = 'origin-request',
   /**
    * The origin-response specifies the response from the
    * origin location (e.g. S3)
    */
-  ORIGIN_RESPONSE = "origin-response",
+  ORIGIN_RESPONSE = 'origin-response',
   /**
    * The viewer-request specifies the incoming request
    */
-  VIEWER_REQUEST = "viewer-request",
+  VIEWER_REQUEST = 'viewer-request',
   /**
    * The viewer-response specifies the outgoing reponse
    */
-  VIEWER_RESPONSE = "viewer-response",
+  VIEWER_RESPONSE = 'viewer-response',
+}
+
+export interface ViewerCertificateOptions {
+  /**
+   * How CloudFront should serve HTTPS requests.
+   *
+   * See the notes on SSLMethod if you wish to use other SSL termination types.
+   *
+   * @default SSLMethod.SNI
+   * @see https://docs.aws.amazon.com/cloudfront/latest/APIReference/API_ViewerCertificate.html
+   */
+  readonly sslMethod?: SSLMethod;
+
+  /**
+   * The minimum version of the SSL protocol that you want CloudFront to use for HTTPS connections.
+   *
+   * CloudFront serves your objects only to browsers or devices that support at
+   * least the SSL version that you specify.
+   *
+   * @default - SSLv3 if sslMethod VIP, TLSv1 if sslMethod SNI
+   */
+  readonly securityPolicy?: SecurityPolicyProtocol;
+
+  /**
+   * Domain names on the certificate (both main domain name and Subject Alternative names)
+   */
+  readonly aliases?: string[];
+}
+
+/**
+ * Viewer certificate configuration class
+ */
+export class ViewerCertificate {
+  /**
+   * Generate an AWS Certificate Manager (ACM) viewer certificate configuration
+   *
+   * @param certificate AWS Certificate Manager (ACM) certificate.
+   *                    Your certificate must be located in the us-east-1 (US East (N. Virginia)) region to be accessed by CloudFront
+   * @param options certificate configuration options
+   */
+  public static fromAcmCertificate(certificate: certificatemanager.ICertificate, options: ViewerCertificateOptions = {}) {
+    const {
+      sslMethod: sslSupportMethod = SSLMethod.SNI,
+      securityPolicy: minimumProtocolVersion,
+      aliases,
+    } = options;
+
+    return new ViewerCertificate({
+      acmCertificateArn: certificate.certificateArn, sslSupportMethod, minimumProtocolVersion,
+    }, aliases);
+  }
+
+  /**
+   * Generate an IAM viewer certificate configuration
+   *
+   * @param iamCertificateId Identifier of the IAM certificate
+   * @param options certificate configuration options
+   */
+  public static fromIamCertificate(iamCertificateId: string, options: ViewerCertificateOptions = {}) {
+    const {
+      sslMethod: sslSupportMethod = SSLMethod.SNI,
+      securityPolicy: minimumProtocolVersion,
+      aliases,
+    } = options;
+
+    return new ViewerCertificate({
+      iamCertificateId, sslSupportMethod, minimumProtocolVersion,
+    }, aliases);
+  }
+
+  /**
+   * Generate a viewer certifcate configuration using
+   * the CloudFront default certificate (e.g. d111111abcdef8.cloudfront.net)
+   * and a {@link SecurityPolicyProtocol.TLS_V1} security policy.
+   *
+   * @param aliases Alternative CNAME aliases
+   *                You also must create a CNAME record with your DNS service to route queries
+   */
+  public static fromCloudFrontDefaultCertificate(...aliases: string[]) {
+    return new ViewerCertificate({ cloudFrontDefaultCertificate: true }, aliases);
+  }
+
+  private constructor(
+    public readonly props: CfnDistribution.ViewerCertificateProperty,
+    public readonly aliases: string[] = []) { }
+}
+
+/**
+ * Controls the countries in which your content is distributed.
+ */
+export class GeoRestriction {
+
+  /**
+   * Whitelist specific countries which you want CloudFront to distribute your content.
+   *
+   * @param locations Two-letter, uppercase country code for a country
+   * that you want to whitelist. Include one element for each country.
+   * See ISO 3166-1-alpha-2 code on the *International Organization for Standardization* website
+   */
+  public static whitelist(...locations: string[]) {
+    return new GeoRestriction('whitelist', GeoRestriction.validateLocations(locations));
+  }
+
+  /**
+   * Blacklist specific countries which you don't want CloudFront to distribute your content.
+   *
+   * @param locations Two-letter, uppercase country code for a country
+   * that you want to blacklist. Include one element for each country.
+   * See ISO 3166-1-alpha-2 code on the *International Organization for Standardization* website
+   */
+  public static blacklist(...locations: string[]) {
+    return new GeoRestriction('blacklist', GeoRestriction.validateLocations(locations));
+  }
+
+  private static LOCATION_REGEX = /^[A-Z]{2}$/;
+
+  private static validateLocations(locations: string[]) {
+    if (locations.length === 0) {
+      throw new Error('Should provide at least 1 location');
+    }
+    locations.forEach(location => {
+      if (!GeoRestriction.LOCATION_REGEX.test(location)) {
+        // eslint-disable-next-line max-len
+        throw new Error(`Invalid location format for location: ${location}, location should be two-letter and uppercase country ISO 3166-1-alpha-2 code`);
+      }
+    });
+    return locations;
+  }
+
+  /**
+   * Creates an instance of GeoRestriction for internal use
+   *
+   * @param restrictionType Specifies the restriction type to impose (whitelist or blacklist)
+   * @param locations Two-letter, uppercase country code for a country
+   * that you want to whitelist/blacklist. Include one element for each country.
+   * See ISO 3166-1-alpha-2 code on the *International Organization for Standardization* website
+   */
+  private constructor(readonly restrictionType: 'whitelist' | 'blacklist', readonly locations: string[]) {}
 }
 
 export interface CloudFrontWebDistributionProps {
@@ -395,6 +533,7 @@ export interface CloudFrontWebDistributionProps {
    * AliasConfiguration is used to configured CloudFront to respond to requests on custom domain names.
    *
    * @default - None.
+   * @deprecated see {@link CloudFrontWebDistributionProps#viewerCertificate} with {@link ViewerCertificate#acmCertificate}
    */
   readonly aliasConfiguration?: AliasConfiguration;
 
@@ -429,7 +568,7 @@ export interface CloudFrontWebDistributionProps {
   /**
    * The price class for the distribution (this impacts how many locations CloudFront uses for your distribution, and billing)
    *
-   * @default PriceClass.PriceClass100 the cheapest option for CloudFront is picked by default.
+   * @default PriceClass.PRICE_CLASS_100 the cheapest option for CloudFront is picked by default.
    */
   readonly priceClass?: PriceClass;
 
@@ -472,6 +611,23 @@ export interface CloudFrontWebDistributionProps {
    */
   readonly webACLId?: string;
 
+  /**
+   * Specifies whether you want viewers to use HTTP or HTTPS to request your objects,
+   * whether you're using an alternate domain name with HTTPS, and if so,
+   * if you're using AWS Certificate Manager (ACM) or a third-party certificate authority.
+   *
+   * @default ViewerCertificate.fromCloudFrontDefaultCertificate()
+   *
+   * @see https://aws.amazon.com/premiumsupport/knowledge-center/custom-ssl-certificate-cloudfront/
+   */
+  readonly viewerCertificate?: ViewerCertificate;
+
+  /**
+   * Controls the countries in which your content is distributed.
+   *
+   * @default No geo restriction
+   */
+  readonly geoRestriction?: GeoRestriction;
 }
 
 /**
@@ -509,9 +665,9 @@ interface BehaviorWithOrigin extends Behavior {
  *
  * You can customize the distribution using additional properties from the CloudFrontWebDistributionProps interface.
  *
- *
+ * @resource AWS::CloudFront::Distribution
  */
-export class CloudFrontWebDistribution extends cdk.Construct implements IDistribution {
+export class CloudFrontWebDistribution extends cdk.Resource implements IDistribution {
   /**
    * The logging bucket for this CloudFront distribution.
    * If logging is not enabled for this distribution - this property will be undefined.
@@ -521,9 +677,18 @@ export class CloudFrontWebDistribution extends cdk.Construct implements IDistrib
   /**
    * The domain name created by CloudFront for this distribution.
    * If you are using aliases for your distribution, this is the domainName your DNS records should point to.
-   * (In Route53, you could create an ALIAS record to this value, for example. )
+   * (In Route53, you could create an ALIAS record to this value, for example.)
+   *
+   * @deprecated - Use `distributionDomainName` instead.
    */
   public readonly domainName: string;
+
+  /**
+   * The domain name created by CloudFront for this distribution.
+   * If you are using aliases for your distribution, this is the domainName your DNS records should point to.
+   * (In Route53, you could create an ALIAS record to this value, for example.)
+   */
+  public readonly distributionDomainName: string;
 
   /**
    * The distribution ID for this distribution.
@@ -534,20 +699,20 @@ export class CloudFrontWebDistribution extends cdk.Construct implements IDistrib
    * Maps our methods to the string arrays they are
    */
   private readonly METHOD_LOOKUP_MAP = {
-    GH: ["GET", "HEAD"],
-    GHO: ["GET", "HEAD", "OPTIONS"],
-    ALL: ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"],
+    GH: ['GET', 'HEAD'],
+    GHO: ['GET', 'HEAD', 'OPTIONS'],
+    ALL: ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT'],
   };
 
   /**
    * Maps for which SecurityPolicyProtocol are available to which SSLMethods
    */
-  private readonly VALID_SSL_PROTOCOLS: { [key: string]: string[] } = {
-    "sni-only": [
+  private readonly VALID_SSL_PROTOCOLS: { [method in SSLMethod]: string[] } = {
+    [SSLMethod.SNI]: [
       SecurityPolicyProtocol.TLS_V1, SecurityPolicyProtocol.TLS_V1_1_2016,
-      SecurityPolicyProtocol.TLS_V1_2016, SecurityPolicyProtocol.TLS_V1_2_2018
+      SecurityPolicyProtocol.TLS_V1_2016, SecurityPolicyProtocol.TLS_V1_2_2018,
     ],
-    "vip": [SecurityPolicyProtocol.SSL_V3, SecurityPolicyProtocol.TLS_V1],
+    [SSLMethod.VIP]: [SecurityPolicyProtocol.SSL_V3, SecurityPolicyProtocol.TLS_V1],
   };
 
   constructor(scope: cdk.Construct, id: string, props: CloudFrontWebDistributionProps) {
@@ -556,11 +721,11 @@ export class CloudFrontWebDistribution extends cdk.Construct implements IDistrib
     let distributionConfig: CfnDistribution.DistributionConfigProperty = {
       comment: props.comment,
       enabled: true,
-      defaultRootObject: props.defaultRootObject !== undefined ? props.defaultRootObject : "index.html",
+      defaultRootObject: props.defaultRootObject !== undefined ? props.defaultRootObject : 'index.html',
       httpVersion: props.httpVersion || HttpVersion.HTTP2,
       priceClass: props.priceClass || PriceClass.PRICE_CLASS_100,
       ipv6Enabled: (props.enableIpV6 !== undefined) ? props.enableIpV6 : true,
-      // tslint:disable-next-line:max-line-length
+      // eslint-disable-next-line max-len
       customErrorResponses: props.errorConfigurations, // TODO: validation : https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-cloudfront-distribution-customerrorresponse.html#cfn-cloudfront-distribution-customerrorresponse-errorcachingminttl
       webAclId: props.webACLId,
     };
@@ -573,10 +738,10 @@ export class CloudFrontWebDistribution extends cdk.Construct implements IDistrib
     for (const originConfig of props.originConfigs) {
       const originId = `origin${originIndex}`;
       if (!originConfig.s3OriginSource && !originConfig.customOriginSource) {
-        throw new Error("There must be at least one origin source - either an s3OriginSource or a customOriginSource");
+        throw new Error('There must be at least one origin source - either an s3OriginSource or a customOriginSource');
       }
       if (originConfig.customOriginSource && originConfig.s3OriginSource) {
-        throw new Error("There cannot be both an s3OriginSource and a customOriginSource in the same SourceConfiguration.");
+        throw new Error('There cannot be both an s3OriginSource and a customOriginSource in the same SourceConfiguration.');
       }
 
       const originHeaders: CfnDistribution.OriginCustomHeaderProperty[] = [];
@@ -584,10 +749,38 @@ export class CloudFrontWebDistribution extends cdk.Construct implements IDistrib
         Object.keys(originConfig.originHeaders).forEach(key => {
           const oHeader: CfnDistribution.OriginCustomHeaderProperty = {
             headerName: key,
-            headerValue: originConfig.originHeaders![key]
+            headerValue: originConfig.originHeaders![key],
           };
           originHeaders.push(oHeader);
         });
+      }
+
+      let s3OriginConfig: CfnDistribution.S3OriginConfigProperty | undefined;
+      if (originConfig.s3OriginSource) {
+        // first case for backwards compatibility
+        if (originConfig.s3OriginSource.originAccessIdentity) {
+          // grant CloudFront OriginAccessIdentity read access to S3 bucket
+          originConfig.s3OriginSource.s3BucketSource.grantRead(originConfig.s3OriginSource.originAccessIdentity);
+
+          s3OriginConfig = {
+            originAccessIdentity:
+              `origin-access-identity/cloudfront/${
+                originConfig.s3OriginSource.originAccessIdentity.originAccessIdentityName
+              }`,
+          };
+        } else {
+          s3OriginConfig = {};
+        }
+      }
+
+      const connectionAttempts = originConfig.connectionAttempts ?? 3;
+      if (connectionAttempts < 1 || 3 < connectionAttempts || !Number.isInteger(connectionAttempts)) {
+        throw new Error('connectionAttempts: You can specify 1, 2, or 3 as the number of attempts.');
+      }
+
+      const connectionTimeout = (originConfig.connectionTimeout || cdk.Duration.seconds(10)).toSeconds();
+      if (connectionTimeout < 1 || 10 < connectionTimeout || !Number.isInteger(connectionTimeout)) {
+        throw new Error('connectionTimeout: You can specify a number of seconds between 1 and 10 (inclusive).');
       }
 
       const originProperty: CfnDistribution.OriginProperty = {
@@ -597,11 +790,7 @@ export class CloudFrontWebDistribution extends cdk.Construct implements IDistrib
           : originConfig.customOriginSource!.domainName,
         originPath: originConfig.originPath,
         originCustomHeaders: originHeaders.length > 0 ? originHeaders : undefined,
-        s3OriginConfig: originConfig.s3OriginSource && originConfig.s3OriginSource.originAccessIdentityId
-          ? { originAccessIdentity: `origin-access-identity/cloudfront/${originConfig.s3OriginSource.originAccessIdentityId}` }
-          : originConfig.s3OriginSource
-          ? { }
-          : undefined,
+        s3OriginConfig,
         customOriginConfig: originConfig.customOriginSource
           ? {
             httpPort: originConfig.customOriginSource.httpPort || 80,
@@ -611,9 +800,11 @@ export class CloudFrontWebDistribution extends cdk.Construct implements IDistrib
             originReadTimeout: originConfig.customOriginSource.originReadTimeout
               && originConfig.customOriginSource.originReadTimeout.toSeconds() || 30,
             originProtocolPolicy: originConfig.customOriginSource.originProtocolPolicy || OriginProtocolPolicy.HTTPS_ONLY,
-            originSslProtocols: originConfig.customOriginSource.allowedOriginSSLVersions || [OriginSslPolicy.TLS_V1_2]
+            originSslProtocols: originConfig.customOriginSource.allowedOriginSSLVersions || [OriginSslPolicy.TLS_V1_2],
           }
-          : undefined
+          : undefined,
+        connectionAttempts,
+        connectionTimeout,
       };
 
       for (const behavior of originConfig.behaviors) {
@@ -631,12 +822,12 @@ export class CloudFrontWebDistribution extends cdk.Construct implements IDistrib
     });
     distributionConfig = {
       ...distributionConfig,
-      origins
+      origins,
     };
 
     const defaultBehaviors = behaviors.filter(behavior => behavior.isDefaultBehavior);
     if (defaultBehaviors.length !== 1) {
-      throw new Error("There can only be one default behavior across all sources. [ One default behavior per distribution ].");
+      throw new Error('There can only be one default behavior across all sources. [ One default behavior per distribution ].');
     }
 
     distributionConfig = { ...distributionConfig, defaultCacheBehavior: this.toBehavior(defaultBehaviors[0], props.viewerProtocolPolicy) };
@@ -644,60 +835,78 @@ export class CloudFrontWebDistribution extends cdk.Construct implements IDistrib
     const otherBehaviors: CfnDistribution.CacheBehaviorProperty[] = [];
     for (const behavior of behaviors.filter(b => !b.isDefaultBehavior)) {
       if (!behavior.pathPattern) {
-        throw new Error("pathPattern is required for all non-default behaviors");
+        throw new Error('pathPattern is required for all non-default behaviors');
       }
       otherBehaviors.push(this.toBehavior(behavior, props.viewerProtocolPolicy) as CfnDistribution.CacheBehaviorProperty);
     }
 
     distributionConfig = { ...distributionConfig, cacheBehaviors: otherBehaviors.length > 0 ? otherBehaviors : undefined };
 
+    if (props.aliasConfiguration && props.viewerCertificate) {
+      throw new Error([
+        'You cannot set both aliasConfiguration and viewerCertificate properties.',
+        'Please only use viewerCertificate, as aliasConfiguration is deprecated.',
+      ].join(' '));
+    }
+
+    let _viewerCertificate = props.viewerCertificate;
     if (props.aliasConfiguration) {
-      const minimumProtocolVersion = props.aliasConfiguration.securityPolicy;
-      const sslSupportMethod = props.aliasConfiguration.sslMethod || SSLMethod.SNI;
-      const acmCertificateArn = props.aliasConfiguration.acmCertRef;
+      const {acmCertRef, securityPolicy, sslMethod, names: aliases} = props.aliasConfiguration;
 
-      distributionConfig = {
-        ...distributionConfig,
-        aliases: props.aliasConfiguration.names,
-        viewerCertificate: {
-          acmCertificateArn,
-          sslSupportMethod,
-          minimumProtocolVersion
-        }
-      };
+      _viewerCertificate = ViewerCertificate.fromAcmCertificate(
+        certificatemanager.Certificate.fromCertificateArn(this, 'AliasConfigurationCert', acmCertRef),
+        { securityPolicy, sslMethod, aliases },
+      );
+    }
 
-      if (minimumProtocolVersion !== undefined) {
-        const validProtocols = this.VALID_SSL_PROTOCOLS[sslSupportMethod.toString()];
+    if (_viewerCertificate) {
+      const {props: viewerCertificate, aliases} = _viewerCertificate;
+      Object.assign(distributionConfig, {aliases, viewerCertificate});
 
-        if (validProtocols === undefined) {
-          throw new Error(`Invalid sslMethod. ${sslSupportMethod.toString()} is not fully implemented yet.`);
-        }
+      const {minimumProtocolVersion, sslSupportMethod} = viewerCertificate;
+
+      if (minimumProtocolVersion != null && sslSupportMethod != null) {
+        const validProtocols = this.VALID_SSL_PROTOCOLS[sslSupportMethod as SSLMethod];
 
         if (validProtocols.indexOf(minimumProtocolVersion.toString()) === -1) {
-          // tslint:disable-next-line:max-line-length
-          throw new Error(`${minimumProtocolVersion} is not compabtible with sslMethod ${sslSupportMethod}.\n\tValid Protocols are: ${validProtocols.join(", ")}`);
+          // eslint-disable-next-line max-len
+          throw new Error(`${minimumProtocolVersion} is not compabtible with sslMethod ${sslSupportMethod}.\n\tValid Protocols are: ${validProtocols.join(', ')}`);
         }
       }
     } else {
       distributionConfig = { ...distributionConfig,
-        viewerCertificate: { cloudFrontDefaultCertificate: true }
+        viewerCertificate: { cloudFrontDefaultCertificate: true },
       };
     }
 
     if (props.loggingConfig) {
-      this.loggingBucket = props.loggingConfig.bucket || new s3.Bucket(this, `LoggingBucket`);
+      this.loggingBucket = props.loggingConfig.bucket || new s3.Bucket(this, 'LoggingBucket');
       distributionConfig = {
         ...distributionConfig,
         logging: {
           bucket: this.loggingBucket.bucketRegionalDomainName,
           includeCookies: props.loggingConfig.includeCookies || false,
-          prefix: props.loggingConfig.prefix
-        }
+          prefix: props.loggingConfig.prefix,
+        },
+      };
+    }
+
+    if (props.geoRestriction) {
+      distributionConfig = {
+        ...distributionConfig,
+        restrictions: {
+          geoRestriction: {
+            restrictionType: props.geoRestriction.restrictionType,
+            locations: props.geoRestriction.locations,
+          },
+        },
       };
     }
 
     const distribution = new CfnDistribution(this, 'CFDistribution', { distributionConfig });
+    this.node.defaultChild = distribution;
     this.domainName = distribution.attrDomainName;
+    this.distributionDomainName = distribution.attrDomainName;
     this.distributionId = distribution.ref;
   }
 
@@ -707,7 +916,7 @@ export class CloudFrontWebDistribution extends cdk.Construct implements IDistrib
       cachedMethods: this.METHOD_LOOKUP_MAP[input.cachedMethods || CloudFrontAllowedCachedMethods.GET_HEAD],
       compress: input.compress !== false,
       defaultTtl: input.defaultTtl && input.defaultTtl.toSeconds(),
-      forwardedValues: input.forwardedValues || { queryString: false, cookies: { forward: "none" } },
+      forwardedValues: input.forwardedValues || { queryString: false, cookies: { forward: 'none' } },
       maxTtl: input.maxTtl && input.maxTtl.toSeconds(),
       minTtl: input.minTtl && input.minTtl.toSeconds(),
       trustedSigners: input.trustedSigners,
@@ -723,8 +932,18 @@ export class CloudFrontWebDistribution extends cdk.Construct implements IDistrib
           .map(fna => ({
             eventType: fna.eventType,
             lambdaFunctionArn: fna.lambdaFunction && fna.lambdaFunction.functionArn,
-          }))
+          })),
       });
+
+      // allow edgelambda.amazonaws.com to assume the functions' execution role.
+      for (const a of input.lambdaFunctionAssociations) {
+        if (a.lambdaFunction.role && a.lambdaFunction.role instanceof iam.Role && a.lambdaFunction.role.assumeRolePolicy) {
+          a.lambdaFunction.role.assumeRolePolicy.addStatements(new iam.PolicyStatement({
+            actions: [ 'sts:AssumeRole' ],
+            principals: [ new iam.ServicePrincipal('edgelambda.amazonaws.com') ],
+          }));
+        }
+      }
     }
     return toReturn;
   }

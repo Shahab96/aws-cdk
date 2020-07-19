@@ -1,4 +1,5 @@
 import { App, Construct, Lazy, Resource, Stack, Token } from '@aws-cdk/core';
+import { IEventBus } from './event-bus';
 import { EventPattern } from './event-pattern';
 import { CfnEventBusPolicy, CfnRule } from './events.generated';
 import { IRule } from './rule-ref';
@@ -6,6 +7,9 @@ import { Schedule } from './schedule';
 import { IRuleTarget } from './target';
 import { mergeEventPattern } from './util';
 
+/**
+ * Properties for defining an EventBridge Rule
+ */
 export interface RuleProps {
   /**
    * A description of the rule's purpose.
@@ -30,11 +34,11 @@ export interface RuleProps {
   readonly enabled?: boolean;
 
   /**
-   * The schedule or rate (frequency) that determines when CloudWatch Events
+   * The schedule or rate (frequency) that determines when EventBridge
    * runs the rule. For more information, see Schedule Expression Syntax for
-   * Rules in the Amazon CloudWatch User Guide.
+   * Rules in the Amazon EventBridge User Guide.
    *
-   * @see http://docs.aws.amazon.com/AmazonCloudWatch/latest/events/ScheduledEvents.html
+   * @see https://docs.aws.amazon.com/eventbridge/latest/userguide/scheduled-events.html
    *
    * You must specify this property, the `eventPattern` property, or both.
    *
@@ -43,12 +47,12 @@ export interface RuleProps {
   readonly schedule?: Schedule;
 
   /**
-   * Describes which events CloudWatch Events routes to the specified target.
+   * Describes which events EventBridge routes to the specified target.
    * These routed events are matched events. For more information, see Events
-   * and Event Patterns in the Amazon CloudWatch User Guide.
+   * and Event Patterns in the Amazon EventBridge User Guide.
    *
    * @see
-   * http://docs.aws.amazon.com/AmazonCloudWatch/latest/DeveloperGuide/CloudWatchEventsandEventPatterns.html
+   * https://docs.aws.amazon.com/eventbridge/latest/userguide/eventbridge-and-event-patterns.html
    *
    * You must specify this property (either via props or via
    * `addEventPattern`), the `scheduleExpression` property, or both. The
@@ -68,15 +72,29 @@ export interface RuleProps {
    * @default - No targets.
    */
   readonly targets?: IRuleTarget[];
+
+  /**
+   * The event bus to associate with this rule.
+   *
+   * @default - The default event bus.
+   */
+  readonly eventBus?: IEventBus;
 }
 
 /**
- * Defines a CloudWatch Event Rule in this stack.
+ * Defines an EventBridge Rule in this stack.
  *
  * @resource AWS::Events::Rule
  */
 export class Rule extends Resource implements IRule {
 
+  /**
+   * Import an existing EventBridge Rule provided an ARN
+   *
+   * @param scope The parent creating construct (usually `this`).
+   * @param id The construct's name.
+   * @param eventRuleArn Event Rule ARN (i.e. arn:aws:events:<region>:<account-id>:rule/MyScheduledRule).
+   */
   public static fromEventRuleArn(scope: Construct, id: string, eventRuleArn: string): IRule {
     const parts = Stack.of(scope).parseArn(eventRuleArn);
 
@@ -100,15 +118,22 @@ export class Rule extends Resource implements IRule {
     super(scope, id, {
       physicalName: props.ruleName,
     });
+
+    if (props.eventBus && props.schedule) {
+      throw new Error('Cannot associate rule with \'eventBus\' when using \'schedule\'');
+    }
+
     this.description = props.description;
+    this.scheduleExpression = props.schedule && props.schedule.expressionString;
 
     const resource = new CfnRule(this, 'Resource', {
       name: this.physicalName,
       description: this.description,
       state: props.enabled == null ? 'ENABLED' : (props.enabled ? 'ENABLED' : 'DISABLED'),
-      scheduleExpression: Lazy.stringValue({ produce: () => this.scheduleExpression }),
-      eventPattern: Lazy.anyValue({ produce: () => this.renderEventPattern() }),
+      scheduleExpression: this.scheduleExpression,
+      eventPattern: Lazy.anyValue({ produce: () => this._renderEventPattern() }),
       targets: Lazy.anyValue({ produce: () => this.renderTargets() }),
+      eventBusName: props.eventBus && props.eventBus.eventBusName,
     });
 
     this.ruleArn = this.getResourceArnAttribute(resource.attrArn, {
@@ -119,7 +144,6 @@ export class Rule extends Resource implements IRule {
     this.ruleName = this.getResourceNameAttribute(resource.ref);
 
     this.addEventPattern(props.eventPattern);
-    this.scheduleExpression = props.schedule && props.schedule.expressionString;
 
     for (const target of props.targets || []) {
       this.addTarget(target);
@@ -160,7 +184,7 @@ export class Rule extends Resource implements IRule {
       if (targetAccount !== sourceAccount) {
         // cross-account event - strap in, this works differently than regular events!
         // based on:
-        // https://docs.aws.amazon.com/AmazonCloudWatch/latest/events/CloudWatchEvents-CrossAccountEventDelivery.html
+        // https://docs.aws.amazon.com/eventbridge/latest/userguide/eventbridge-cross-account-event-delivery.html
 
         // for cross-account events, we require concrete accounts
         if (Token.isUnresolved(targetAccount)) {
@@ -194,7 +218,7 @@ export class Rule extends Resource implements IRule {
         // Grant the source account permissions to publish events to the event bus of the target account.
         // Do it in a separate stack instead of the target stack (which seems like the obvious place to put it),
         // because it needs to be deployed before the rule containing the above event-bus target in the source stack
-        // (CloudWatch verifies whether you have permissions to the targets on rule creation),
+        // (EventBridge verifies whether you have permissions to the targets on rule creation),
         // but it's common for the target stack to depend on the source stack
         // (that's the case with CodePipeline, for example)
         const sourceApp = this.node.root;
@@ -218,9 +242,9 @@ export class Rule extends Resource implements IRule {
             },
             stackName: `${targetStack.stackName}-EventBusPolicy-support-${targetRegion}-${sourceAccount}`,
           });
-          new CfnEventBusPolicy(eventBusPolicyStack, `GivePermToOtherAccount`, {
+          new CfnEventBusPolicy(eventBusPolicyStack, 'GivePermToOtherAccount', {
             action: 'events:PutEvents',
-            statementId: 'MySid',
+            statementId: `Allow-account-${sourceAccount}`,
             principal: sourceAccount,
           });
         }
@@ -229,7 +253,29 @@ export class Rule extends Resource implements IRule {
 
         // The actual rule lives in the target stack.
         // Other than the account, it's identical to this one
-        new Rule(targetStack, `${this.node.uniqueId}-${id}`, {
+
+        // eventPattern is mutable through addEventPattern(), so we need to lazy evaluate it
+        // but only Tokens can be lazy in the framework, so make a subclass instead
+        const self = this;
+        class CopyRule extends Rule {
+          public _renderEventPattern(): any {
+            return self._renderEventPattern();
+          }
+
+          // we need to override validate(), as it uses the
+          // value of the eventPattern field,
+          // which might be empty in the case of the copied rule
+          // (as the patterns in the original might be added through addEventPattern(),
+          // not passed through the constructor).
+          // Anyway, even if the original rule is invalid,
+          // we would get duplicate errors if we didn't override this,
+          // which is probably a bad idea in and of itself
+          protected validate(): string[] {
+            return [];
+          }
+        }
+
+        new CopyRule(targetStack, `${this.node.uniqueId}-${id}`, {
           targets: [target],
           eventPattern: this.eventPattern,
           schedule: this.scheduleExpression ? Schedule.expression(this.scheduleExpression) : undefined,
@@ -247,6 +293,7 @@ export class Rule extends Resource implements IRule {
       ecsParameters: targetProps.ecsParameters,
       kinesisParameters: targetProps.kinesisParameters,
       runCommandParameters: targetProps.runCommandParameters,
+      batchParameters: targetProps.batchParameters,
       sqsParameters: targetProps.sqsParameters,
       input: inputProps && inputProps.input,
       inputPath: inputProps && inputProps.inputPath,
@@ -297,23 +344,12 @@ export class Rule extends Resource implements IRule {
     mergeEventPattern(this.eventPattern, eventPattern);
   }
 
-  protected validate() {
-    if (Object.keys(this.eventPattern).length === 0 && !this.scheduleExpression) {
-      return [ `Either 'eventPattern' or 'schedule' must be defined` ];
-    }
-
-    return [ ];
-  }
-
-  private renderTargets() {
-    if (this.targets.length === 0) {
-      return undefined;
-    }
-
-    return this.targets;
-  }
-
-  private renderEventPattern() {
+  /**
+   * Not private only to be overrideen in CopyRule.
+   *
+   * @internal
+   */
+  public _renderEventPattern(): any {
     const eventPattern = this.eventPattern;
 
     if (Object.keys(eventPattern).length === 0) {
@@ -331,5 +367,21 @@ export class Rule extends Resource implements IRule {
     }
 
     return out;
+  }
+
+  protected validate() {
+    if (Object.keys(this.eventPattern).length === 0 && !this.scheduleExpression) {
+      return ['Either \'eventPattern\' or \'schedule\' must be defined'];
+    }
+
+    return [];
+  }
+
+  private renderTargets() {
+    if (this.targets.length === 0) {
+      return undefined;
+    }
+
+    return this.targets;
   }
 }

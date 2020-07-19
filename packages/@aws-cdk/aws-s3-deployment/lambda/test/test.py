@@ -16,7 +16,7 @@ from unittest.mock import patch
 class TestHandler(unittest.TestCase):
     def setUp(self):
         logger = logging.getLogger()
-        
+
         # clean up old aws.out file (from previous runs)
         try: os.remove("aws.out")
         except OSError: pass
@@ -33,8 +33,36 @@ class TestHandler(unittest.TestCase):
         })
 
         self.assertAwsCommands(
-            "s3 cp s3://<source-bucket>/<source-object-key> archive.zip",
-            "s3 sync --delete contents.zip s3://<dest-bucket-name>/"
+            ["s3", "cp", "s3://<source-bucket>/<source-object-key>", "archive.zip"],
+            ["s3", "sync", "--delete", "contents.zip", "s3://<dest-bucket-name>/"]
+        )
+
+    def test_create_no_delete(self):
+        invoke_handler("Create", {
+            "SourceBucketNames": ["<source-bucket>"],
+            "SourceObjectKeys": ["<source-object-key>"],
+            "DestinationBucketName": "<dest-bucket-name>",
+            "Prune": "false"
+        })
+
+        self.assertAwsCommands(
+            ["s3", "cp", "s3://<source-bucket>/<source-object-key>", "archive.zip"],
+            ["s3", "sync", "contents.zip", "s3://<dest-bucket-name>/"]
+        )
+
+    def test_update_no_delete(self):
+        invoke_handler("Update", {
+            "SourceBucketNames": ["<source-bucket>"],
+            "SourceObjectKeys": ["<source-object-key>"],
+            "DestinationBucketName": "<dest-bucket-name>",
+            "Prune": "false"
+        }, old_resource_props={
+            "DestinationBucketName": "<dest-bucket-name>",
+        }, physical_id="<physical-id>")
+
+        self.assertAwsCommands(
+            ["s3", "cp", "s3://<source-bucket>/<source-object-key>", "archive.zip"],
+            ["s3", "sync", "contents.zip", "s3://<dest-bucket-name>/"]
         )
 
     def test_create_update_multiple_sources(self):
@@ -47,9 +75,9 @@ class TestHandler(unittest.TestCase):
         # Note: these are different files in real-life. For testing purposes, we hijack
         #       the command to output a static filename, archive.zip
         self.assertAwsCommands(
-            "s3 cp s3://<source-bucket1>/<source-object-key1> archive.zip",
-            "s3 cp s3://<source-bucket2>/<source-object-key2> archive.zip",
-            "s3 sync --delete contents.zip s3://<dest-bucket-name>/"
+            ["s3", "cp", "s3://<source-bucket1>/<source-object-key1>", "archive.zip"],
+            ["s3", "cp", "s3://<source-bucket2>/<source-object-key2>", "archive.zip"],
+            ["s3", "sync", "--delete", "contents.zip", "s3://<dest-bucket-name>/"]
         )
 
     def test_create_with_backslash_prefix_same_as_no_prefix(self):
@@ -61,8 +89,8 @@ class TestHandler(unittest.TestCase):
         })
 
         self.assertAwsCommands(
-            "s3 cp s3://<source-bucket>/<source-object-key> archive.zip",
-            "s3 sync --delete contents.zip s3://<dest-bucket-name>/"
+            ["s3", "cp", "s3://<source-bucket>/<source-object-key>", "archive.zip"],
+            ["s3", "sync", "--delete", "contents.zip", "s3://<dest-bucket-name>/"]
         )
 
 
@@ -75,8 +103,23 @@ class TestHandler(unittest.TestCase):
         })
 
         self.assertAwsCommands(
-            "s3 cp s3://<source-bucket>/<source-object-key> archive.zip",
-            "s3 sync --delete contents.zip s3://<dest-bucket-name>/<dest-key-prefix>"
+            ["s3", "cp", "s3://<source-bucket>/<source-object-key>", "archive.zip"],
+            ["s3", "sync", "--delete", "contents.zip", "s3://<dest-bucket-name>/<dest-key-prefix>"]
+        )
+
+    def test_create_update_with_metadata(self):
+        invoke_handler("Create", {
+            "SourceBucketNames": ["<source-bucket>"],
+            "SourceObjectKeys": ["<source-object-key>"],
+            "DestinationBucketName": "<dest-bucket-name>",
+            "DestinationBucketKeyPrefix": "<dest-key-prefix>",
+            "UserMetadata": { "best": "game" },
+            "SystemMetadata": { "content-type": "text/html", "content-language": "en" }
+        })
+
+        self.assertAwsCommands(
+            ["s3", "cp", "s3://<source-bucket>/<source-object-key>", "archive.zip"],
+            ["s3", "sync", "--delete", "contents.zip", "s3://<dest-bucket-name>/<dest-key-prefix>", "--content-type", "text/html", "--content-language", "en", "--metadata", "{\"x-amzn-meta-best\":\"game\"}", "--metadata-directive", "REPLACE"]
         )
 
     def test_delete_no_retain(self):
@@ -87,7 +130,7 @@ class TestHandler(unittest.TestCase):
             "RetainOnDelete": "false"
         }, physical_id="<physicalid>")
 
-        self.assertAwsCommands("s3 rm s3://<dest-bucket-name>/ --recursive")
+        self.assertAwsCommands(["s3", "rm", "s3://<dest-bucket-name>/", "--recursive"])
 
     def test_delete_with_dest_key(self):
         invoke_handler("Delete", {
@@ -98,7 +141,7 @@ class TestHandler(unittest.TestCase):
             "RetainOnDelete": "false"
         }, physical_id="<physicalid>")
 
-        self.assertAwsCommands("s3 rm s3://<dest-bucket-name>/<dest-key-prefix> --recursive")
+        self.assertAwsCommands(["s3", "rm", "s3://<dest-bucket-name>/<dest-key-prefix>", "--recursive"])
 
     def test_delete_with_retain_explicit(self):
         invoke_handler("Delete", {
@@ -131,7 +174,7 @@ class TestHandler(unittest.TestCase):
         }, physical_id="<physicalid>")
 
         self.assertAwsCommands(
-            "s3 rm s3://<dest-bucket-name>/ --recursive"
+            ["s3", "rm", "s3://<dest-bucket-name>/", "--recursive"]
         )
 
     #
@@ -148,8 +191,8 @@ class TestHandler(unittest.TestCase):
         }, physical_id="<physical-id>")
 
         self.assertAwsCommands(
-            "s3 cp s3://<source-bucket>/<source-object-key> archive.zip",
-            "s3 sync --delete contents.zip s3://<dest-bucket-name>/"
+            ["s3", "cp", "s3://<source-bucket>/<source-object-key>", "archive.zip"],
+            ["s3", "sync", "--delete", "contents.zip", "s3://<dest-bucket-name>/"]
         )
 
     def test_update_same_dest_cf_invalidate(self):
@@ -229,8 +272,8 @@ class TestHandler(unittest.TestCase):
         }, physical_id="<physical-id>")
 
         self.assertAwsCommands(
-            "s3 cp s3://<source-bucket>/<source-object-key> archive.zip",
-            "s3 sync --delete contents.zip s3://<dest-bucket-name>/"
+            ["s3", "cp", "s3://<source-bucket>/<source-object-key>", "archive.zip"],
+            ["s3", "sync", "--delete", "contents.zip", "s3://<dest-bucket-name>/"]
         )
 
     def test_update_new_dest_no_retain(self):
@@ -246,9 +289,9 @@ class TestHandler(unittest.TestCase):
         }, physical_id="<physical-id>")
 
         self.assertAwsCommands(
-            "s3 rm s3://<old-dest-bucket-name>/<old-dest-prefix> --recursive",
-            "s3 cp s3://<source-bucket>/<source-object-key> archive.zip",
-            "s3 sync --delete contents.zip s3://<new-dest-bucket-name>/"
+            ["s3", "rm", "s3://<old-dest-bucket-name>/<old-dest-prefix>", "--recursive"],
+            ["s3", "cp", "s3://<source-bucket>/<source-object-key>", "archive.zip"],
+            ["s3", "sync", "--delete", "contents.zip", "s3://<new-dest-bucket-name>/"]
         )
 
     def test_update_new_dest_retain_implicit(self):
@@ -262,8 +305,8 @@ class TestHandler(unittest.TestCase):
         }, physical_id="<physical-id>")
 
         self.assertAwsCommands(
-            "s3 cp s3://<source-bucket>/<source-object-key> archive.zip",
-            "s3 sync --delete contents.zip s3://<new-dest-bucket-name>/"
+            ["s3", "cp", "s3://<source-bucket>/<source-object-key>", "archive.zip"],
+            ["s3", "sync", "--delete", "contents.zip", "s3://<new-dest-bucket-name>/"]
         )
 
     def test_update_new_dest_prefix_no_retain(self):
@@ -279,9 +322,9 @@ class TestHandler(unittest.TestCase):
         }, physical_id="<physical id>")
 
         self.assertAwsCommands(
-            "s3 rm s3://<dest-bucket-name>/ --recursive",
-            "s3 cp s3://<source-bucket>/<source-object-key> archive.zip",
-            "s3 sync --delete contents.zip s3://<dest-bucket-name>/<new-dest-prefix>"
+            ["s3", "rm", "s3://<dest-bucket-name>/", "--recursive"],
+            ["s3", "cp", "s3://<source-bucket>/<source-object-key>", "archive.zip"],
+            ["s3", "sync", "--delete", "contents.zip", "s3://<dest-bucket-name>/<new-dest-prefix>"]
         )
 
     def test_update_new_dest_prefix_retain_implicit(self):
@@ -295,8 +338,8 @@ class TestHandler(unittest.TestCase):
         }, physical_id="<physical id>")
 
         self.assertAwsCommands(
-            "s3 cp s3://<source-bucket>/<source-object-key> archive.zip",
-            "s3 sync --delete contents.zip s3://<dest-bucket-name>/<new-dest-prefix>"
+            ["s3", "cp", "s3://<source-bucket>/<source-object-key>", "archive.zip"],
+            ["s3", "sync", "--delete", "contents.zip", "s3://<dest-bucket-name>/<new-dest-prefix>"]
         )
 
     #
@@ -371,7 +414,7 @@ def read_aws_out():
         return []
 
     with open("aws.out") as f:
-        return f.read().splitlines()
+        return [json.loads(l) for l in f.read().splitlines()]
 
 #
 # invokes the handler under test

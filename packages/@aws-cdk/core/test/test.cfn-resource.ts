@@ -1,5 +1,5 @@
-import nodeunit = require('nodeunit');
-import core = require('../lib');
+import * as nodeunit from 'nodeunit';
+import * as core from '../lib';
 
 export = nodeunit.testCase({
   '._toCloudFormation': {
@@ -14,17 +14,17 @@ export = nodeunit.testCase({
         test.notEqual(val, null);
       };
 
-      test.deepEqual(app.synth().getStack(stack.stackName).template, {
+      test.deepEqual(app.synth().getStackByName(stack.stackName).template, {
         Resources: {
           DefaultResource: {
-            Type: 'Test::Resource::Fake'
-          }
-        }
+            Type: 'Test::Resource::Fake',
+          },
+        },
       });
-      test.ok(called, `renderProperties must be called called`);
+      test.ok(called, 'renderProperties must be called called');
 
       test.done();
-    }
+    },
   },
 
   'applyRemovalPolicy default includes Update policy'(test: nodeunit.Test) {
@@ -37,14 +37,14 @@ export = nodeunit.testCase({
     resource.applyRemovalPolicy(core.RemovalPolicy.RETAIN);
 
     // THEN
-    test.deepEqual(app.synth().getStack(stack.stackName).template, {
+    test.deepEqual(app.synth().getStackByName(stack.stackName).template, {
       Resources: {
         DefaultResource: {
           Type: 'Test::Resource::Fake',
           DeletionPolicy: 'Retain',
           UpdateReplacePolicy: 'Retain',
-        }
-      }
+        },
+      },
     });
 
     test.done();
@@ -58,17 +58,41 @@ export = nodeunit.testCase({
 
     // WHEN
     resource.applyRemovalPolicy(core.RemovalPolicy.RETAIN, {
-      applyToUpdateReplacePolicy: false
+      applyToUpdateReplacePolicy: false,
     });
 
     // THEN
-    test.deepEqual(app.synth().getStack(stack.stackName).template, {
+    test.deepEqual(app.synth().getStackByName(stack.stackName).template, {
       Resources: {
         DefaultResource: {
           Type: 'Test::Resource::Fake',
           DeletionPolicy: 'Retain',
-        }
-      }
+        },
+      },
+    });
+
+    test.done();
+  },
+
+  'can add metadata'(test: nodeunit.Test) {
+    // GIVEN
+    const app = new core.App();
+    const stack = new core.Stack(app, 'TestStack');
+    const resource = new core.CfnResource(stack, 'DefaultResource', { type: 'Test::Resource::Fake' });
+
+    // WHEN
+    resource.addMetadata('Beep', 'Boop');
+
+    // THEN
+    test.deepEqual(app.synth().getStackByName(stack.stackName).template, {
+      Resources: {
+        DefaultResource: {
+          Type: 'Test::Resource::Fake',
+          Metadata: {
+            Beep: 'Boop',
+          },
+        },
+      },
     });
 
     test.done();
